@@ -1,3 +1,5 @@
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
 #include "JsonBlockPager.hpp"
 
 #include <algorithm>
@@ -11,14 +13,18 @@
 #include <string>
 
 #ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
+
+#include <Windows.h>
 #include <conio.h>
+#include <consoleapi2.h>
+#include <fcntl.h>
+
 #else
+
 #include <sys/select.h>
 #include <termios.h>
 #include <unistd.h>
+
 #endif
 
 #include "jsonWrapper.hpp" // for nlohmann::json
@@ -227,10 +233,10 @@ namespace
         return formatted.empty() ? rawBlock : formatted;
     }
 
-
-
     enum class Key
     {
+        ArrowUp,
+        ArrowDown,
         PageUp,
         PageDown,
         Quit,
@@ -280,17 +286,11 @@ namespace
         std::cout << "\033[2J\033[H";
     }
 
-    void printHelp()
-    {
-        std::cout << "Keys: PageDown = next object, PageUp = previous object, q/Esc = quit\n";
-    }
-
-    void renderBlock(const JsonBlockPager& pager, const JsonBlockPager::Block& block)
+    void renderBlock(const JsonBlockPager& /*pager*/, const JsonBlockPager::Block& block)
     {
         clearScreen();
-        std::cout << "File: " << pager.path().string() << '\n';
+        //std::cout << "File: " << pager.path().string() << '\n';
         std::cout << "Object: " << (block.index + 1) << " (zero-based index " << block.index << ")\n";
-        printHelp();
         std::cout << "------------------------------------------------------------\n";
         try
         {
@@ -313,7 +313,6 @@ namespace
     {
         clearScreen();
         std::cout << message << "\n\n";
-        printHelp();
         std::cout.flush();
     }
 
@@ -338,73 +337,44 @@ namespace
 #ifdef _WIN32
         const int ch = _getch();
         if (ch == 'q' || ch == 'Q' || ch == 27)
-        {
             return Key::Quit;
-        }
         if (ch == 0 || ch == 224)
         {
             const int extended = _getch();
-            if (extended == 73)
-            {
-                return Key::PageUp;
-            }
-            if (extended == 81)
-            {
-                return Key::PageDown;
-            }
+            if (extended == 73) return Key::PageUp;
+            if (extended == 81) return Key::PageDown;
+            if (extended == 72) return Key::ArrowUp;
+            if (extended == 80) return Key::ArrowDown;
         }
         return Key::Unknown;
 #else
         char ch = '\0';
         if (::read(STDIN_FILENO, &ch, 1) != 1)
-        {
             return Key::Unknown;
-        }
 
         if (ch == 'q' || ch == 'Q')
-        {
             return Key::Quit;
-        }
-
         if (ch != '\033')
-        {
             return Key::Unknown;
-        }
-
         char introducer = '\0';
         if (!readByteWithTimeout(introducer, 50))
-        {
             return Key::Quit;
-        }
         if (introducer != '[')
-        {
             return Key::Unknown;
-        }
-
         std::string sequence;
         while (sequence.size() < 16)
         {
             char sequenceByte = '\0';
             if (!readByteWithTimeout(sequenceByte, 50))
-            {
                 return Key::Unknown;
-            }
-
             sequence.push_back(sequenceByte);
             if (sequenceByte >= '@' && sequenceByte <= '~')
-            {
                 break;
-            }
         }
-
-        if (sequence == "5~")
-        {
-            return Key::PageUp;
-        }
-        if (sequence == "6~")
-        {
-            return Key::PageDown;
-        }
+        if (sequence == "5~") return Key::PageUp;
+        if (sequence == "6~") return Key::PageDown;
+        if (sequence == "A") return Key::ArrowUp;
+        if (sequence == "B") return Key::ArrowDown;
         return Key::Unknown;
 #endif
     }
@@ -423,13 +393,15 @@ namespace
 
 int main(int argc, char* argv[])
 {
+#ifdef _WIN32
+    SetConsoleOutputCP(65001);
+#endif
+
     if (argc != 2)
     {
         printUsage(argv[0], argv, argc);
         return EXIT_FAILURE;
     }
-
-    std::cout << "Loading file: " << argv[1] << " ...\n";
 
     try
     {
@@ -451,6 +423,8 @@ int main(int argc, char* argv[])
             switch (readKey())
             {
             case Key::PageDown:
+            [[fallthrough]];
+            case Key::ArrowDown:
             {
                 auto next = pager.loadNext();
                 if (next)
@@ -465,6 +439,8 @@ int main(int argc, char* argv[])
                 break;
             }
             case Key::PageUp:
+            [[fallthrough]];
+            case Key::ArrowUp:
             {
                 auto previous = pager.loadPrevious();
                 if (previous)
