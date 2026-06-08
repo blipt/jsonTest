@@ -31,7 +31,11 @@
 #pragma warning(pop)
 #   include <consoleapi2.h>
 #   include <fcntl.h>
-//#   include <conio.h>
+
+#   ifndef HAS_CURSES
+#       include <conio.h>
+#   endif
+
 #else
 #   include <unistd.h>
 #   include <termios.h>
@@ -393,17 +397,12 @@ Key readKey()
     }
     return Key::Unknown;
 #else
-    // Simple fallback for non-Windows without curses
     return Key::Unknown;
 #endif
 }
 
 int mainLegacyMode(int argc, char* argv[])
 {
-#ifdef _WIN32
-    SetConsoleOutputCP(65001);
-#endif
-
     if (argc != 2)
     {
         std::cerr << "Usage: " << argv[0] << " <path-to-json-array-file>\n";
@@ -473,7 +472,6 @@ int mainLegacyMode(int argc, char* argv[])
         return EXIT_FAILURE;
     }
 }
-
 #endif // HAS_CURSES
 
 int main(int argc, char* argv[])
