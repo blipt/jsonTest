@@ -4,6 +4,7 @@
 
 #include "helper.hpp"
 #include <algorithm>
+#include <cerrno>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -361,6 +362,144 @@ void renderMessage(const std::string& message)
     std::cout.flush();
 }
 
+#ifndef _WIN32
+class RawTerminalMode
+{
+public:
+    RawTerminalMode()
+    {
+        if (tcgetattr(STDIN_FILENO, &m_original) != 0)
+        {
+            return;
+        }
+
+        termios raw = m_original;
+        raw.c_lflag &= static_cast<unsigned>(~(ICANON | ECHO));
+        raw.c_cc[VMIN] = 1;
+        raw.c_cc[VTIME] = 0;
+
+        m_enabled = tcsetattr(STDIN_FILENO, TCSANOW, &raw) == 0;
+    }
+
+    ~RawTerminalMode()
+    {
+        if (m_enabled)
+        {
+            tcsetattr(STDIN_FILENO, TCSANOW, &m_original);
+        }
+    }
+
+    RawTerminalMode(const RawTerminalMode&) = delete;
+    RawTerminalMode& operator=(const RawTerminalMode&) = delete;
+
+private:
+    termios m_original{};
+    bool m_enabled = false;
+};
+
+bool inputReady(int timeoutMicroseconds)
+{
+    while (true)
+    {
+        fd_set readSet;
+        FD_ZERO(&readSet);
+        FD_SET(STDIN_FILENO, &readSet);
+
+        timeval timeout{};
+        timeout.tv_sec = timeoutMicroseconds / 1000000;
+        timeout.tv_usec = timeoutMicroseconds % 1000000;
+
+        const int ready = select(STDIN_FILENO + 1, &readSet, nullptr, nullptr, &timeout);
+        if (ready >= 0)
+        {
+            return ready > 0 && FD_ISSET(STDIN_FILENO, &readSet);
+        }
+        if (errno != EINTR)
+        {
+            return false;
+        }
+    }
+}
+
+std::optional<unsigned char> readByte()
+{
+    unsigned char ch = 0;
+    while (true)
+    {
+        const ssize_t bytesRead = read(STDIN_FILENO, &ch, 1);
+        if (bytesRead == 1)
+        {
+            return ch;
+        }
+        if (bytesRead == 0)
+        {
+            return std::nullopt;
+        }
+        if (errno != EINTR)
+        {
+            return std::nullopt;
+        }
+    }
+}
+
+std::optional<unsigned char> readByteWithTimeout(int timeoutMicroseconds)
+{
+    if (!inputReady(timeoutMicroseconds))
+    {
+        return std::nullopt;
+    }
+    return readByte();
+}
+
+Key parseEscapeSequence()
+{
+    constexpr int escapeTimeoutMicroseconds = 100000;
+
+    const auto introducer = readByteWithTimeout(escapeTimeoutMicroseconds);
+    if (!introducer)
+    {
+        return Key::Quit;
+    }
+
+    if (*introducer == 'O')
+    {
+        const auto key = readByteWithTimeout(escapeTimeoutMicroseconds);
+        if (!key)
+        {
+            return Key::Unknown;
+        }
+        if (*key == 'A') return Key::ArrowUp;
+        if (*key == 'B') return Key::ArrowDown;
+        return Key::Unknown;
+    }
+
+    if (*introducer != '[')
+    {
+        return Key::Unknown;
+    }
+
+    const auto key = readByteWithTimeout(escapeTimeoutMicroseconds);
+    if (!key)
+    {
+        return Key::Unknown;
+    }
+
+    if (*key == 'A') return Key::ArrowUp;
+    if (*key == 'B') return Key::ArrowDown;
+
+    if (*key == '5' || *key == '6')
+    {
+        const auto terminator = readByteWithTimeout(escapeTimeoutMicroseconds);
+        if (terminator && *terminator == '~')
+        {
+            return *key == '5' ? Key::PageUp : Key::PageDown;
+        }
+    }
+
+    return Key::Unknown;
+}
+#endif
+
 Key readKey()
 {
 #ifdef _WIN32
@@ -377,7 +516,18 @@ Key readKey()
     }
     return Key::Unknown;
 #else
-    // Simple fallback for non-Windows without curses
+    RawTerminalMode rawMode;
+    const auto ch = readByte();
+    if (!ch)
+    {
+        return Key::Quit;
+    }
+
+    if (*ch == 'q' || *ch == 'Q')
+        return Key::Quit;
+    if (*ch == 27)
+        return parseEscapeSequence();
+
     return Key::Unknown;
 #endif
 }
