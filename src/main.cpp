@@ -1,166 +1,203 @@
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
 #include "JsonBlockPager.hpp"
 
+#include <algorithm>
+#include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <exception>
 #include <iostream>
 #include <optional>
+#include <sstream>
 #include <string>
 
 #ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
+
+#include <Windows.h>
 #include <conio.h>
+#include <consoleapi2.h>
+#include <fcntl.h>
+
 #else
+
 #include <sys/select.h>
 #include <termios.h>
 #include <unistd.h>
+
 #endif
 
 #include "jsonWrapper.hpp" // for nlohmann::json
 
-inline static std::string rgbToAnsi1(int r, int g, int b)
+namespace
 {
-    return "\033[38;2;" + std::to_string(r) + ";" + std::to_string(g) + ";" + std::to_string(b) + "m";
-}
+    constexpr const char* COLOR_RESET = "\033[0m";
 
-inline static void hexToRGB(const std::string& hex, int& r, int& g, int& b)
-{
-    std::stringstream ss;
-    ss << std::hex << hex.substr(1);
-    unsigned int hexValue;
-    ss >> hexValue;
-    r = (hexValue >> 16) & 0xFF;
-    g = (hexValue >> 8) & 0xFF;
-    b = hexValue & 0xFF;
-}
-
-inline static std::string rgbToAnsi1(const std::string& hex)
-{
-    int r, g, b;
-    hexToRGB(hex, r, g, b);
-    return "\033[38;2;" + std::to_string(r) + ";" + std::to_string(g) + ";" + std::to_string(b) + "m";
-}
-
-inline static std::string toString(const float& val, const int& leadingSpaces, const int& precision)
-{
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%.*f", precision, val);
-    std::string ret = std::string(buf);
-
-    const auto pos = ret.find('.');
-    if (pos == std::string::npos)
+    std::string rgbToAnsi(int r, int g, int b)
     {
-        return ret;
+        return "\033[38;2;" + std::to_string(r) + ";" + std::to_string(g) + ";" + std::to_string(b) + "m";
     }
 
-    auto nSpaces = std::max<int>(0, leadingSpaces - static_cast<int>(pos));
-    if (nSpaces < 0)
+    void hexToRGB(const std::string& hex, int& r, int& g, int& b)
     {
-        nSpaces = 0;
+        std::stringstream ss;
+        ss << std::hex << hex.substr(hex.starts_with('#') ? 1U : 0U);
+        unsigned int hexValue = 0;
+        ss >> hexValue;
+        r = static_cast<int>((hexValue >> 16) & 0xFF);
+        g = static_cast<int>((hexValue >> 8) & 0xFF);
+        b = static_cast<int>(hexValue & 0xFF);
     }
-    ret = std::string(static_cast<size_t>(nSpaces), ' ') + ret;
-    return ret;
-}
 
-inline static std::string rgbToAnsi1(int r, int g, int b) {
-    return "\033[38;2;" + std::to_string(r) + ";" + std::to_string(g) + ";" + std::to_string(b) + "m";
-}
-
-inline static std::string rgbToAnsi1(const std::string& hex) {
-    int r, g, b;
-    hexToRGB(hex, r, g, b);
-    return "\033[38;2;" + std::to_string(r) + ";" + std::to_string(g) + ";" + std::to_string(b) + "m";
-}
-
-inline static uint64_t parseTimestampMs(const std::string& sTimestamp)
-{
-    uint64_t parts[4] = { 0, 0, 0, 0 }; // hours, minutes, seconds, milliseconds
-    size_t idx = 0;
-    uint64_t cur = 0;
-    for (const char c : sTimestamp)
+    std::string rgbToAnsi(const std::string& hex)
     {
-        if (c >= '0' && c <= '9')
+        int r = 0;
+        int g = 0;
+        int b = 0;
+        hexToRGB(hex, r, g, b);
+        return rgbToAnsi(r, g, b);
+    }
+
+    std::string toString(const float& val, const int& leadingSpaces, const int& precision)
+    {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%.*f", precision, val);
+        std::string ret = std::string(buf);
+
+        const auto pos = ret.find('.');
+        if (pos == std::string::npos)
         {
-            cur = cur * 10 + static_cast<uint64_t>(c - '0');
+            return ret;
         }
-        else if (c == ':' || c == '.' || c == ',')
-        {
-            if (idx < 4) parts[idx] = cur;
-            ++idx;
-            cur = 0;
-        }
+
+        const auto nSpaces = std::max<int>(0, leadingSpaces - static_cast<int>(pos));
+        return std::string(static_cast<size_t>(nSpaces), ' ') + ret;
     }
-    if (idx < 4) parts[idx] = cur; // trailing milliseconds field
-    return ((parts[0] * 60u + parts[1]) * 60u + parts[2]) * 1000u + parts[3];
-}
 
-#define COLOR_RESET "\033[0m"
-
-//#define LOG_ERROR()
-//#define LOG_WARN()
-//#define LOG_INFO()
-//#define LOG_DEBUG()
-
-// data -> json {}
-static void chunkParser(void* userData, const char* data, size_t dataSize)
-{
-    try
+    uint64_t parseTimestampMs(const std::string& sTimestamp)
     {
-        nlohmann::json jConfigCurrent;
-        jConfigCurrent = nlohmann::json::parse(std::string(data, dataSize));
-        if (jConfigCurrent.contains("text"))
+        uint64_t parts[4] = { 0, 0, 0, 0 }; // hours, minutes, seconds, milliseconds
+        size_t idx = 0;
+        uint64_t cur = 0;
+        for (const char c : sTimestamp)
         {
-            auto& oText = jConfigCurrent["text"];
-            std::string sText;
-            std::string sTextRaw;
-            if (oText.is_array())
+            if (c >= '0' && c <= '9')
             {
-                auto oTextArr = oText.get<nlohmann::json::array_t>();
-                std::sort(oTextArr.begin(), oTextArr.end(), [](const nlohmann::json& a, const nlohmann::json& b)
-                    {
-                        return a["index"] < b["index"];
-                    });
-
-                for (const auto& oItem : oTextArr)
+                cur = cur * 10 + static_cast<uint64_t>(c - '0');
+            }
+            else if (c == ':' || c == '.' || c == ',')
+            {
+                if (idx < 4)
                 {
-                    if (oItem.contains("color"))
-                    {
-                        sText += rgbToAnsi1(oItem["color"].get<std::string>()) + oItem["value"].get<std::string>() + COLOR_RESET;
-                    }
-                    else
-                    {
-                        sText += oItem["value"].get<std::string>();
-                    }
-
-                    sTextRaw += oItem["value"].get<std::string>();
-
+                    parts[idx] = cur;
                 }
+                ++idx;
+                cur = 0;
+            }
+        }
+        if (idx < 4)
+        {
+            parts[idx] = cur; // trailing milliseconds field
+        }
+        return ((parts[0] * 60u + parts[1]) * 60u + parts[2]) * 1000u + parts[3];
+    }
+
+    void appendLine(std::ostringstream& output, const std::string& line)
+    {
+        if (!line.empty())
+        {
+            output << line << '\n';
+        }
+    }
+
+    std::string formatTextArray(const nlohmann::json& oText)
+    {
+        std::string sText;
+        auto oTextArr = oText.get<nlohmann::json::array_t>();
+        std::sort(oTextArr.begin(), oTextArr.end(), [](const nlohmann::json& a, const nlohmann::json& b)
+            {
+                return a["index"] < b["index"];
+            });
+
+        for (const auto& oItem : oTextArr)
+        {
+            const std::string value = oItem.value("value", "");
+            if (oItem.contains("color") && oItem["color"].is_string())
+            {
+                sText += rgbToAnsi(oItem["color"].get<std::string>()) + value + COLOR_RESET;
             }
             else
             {
-                sText = oText.dump();
-                sTextRaw = sText;
+                sText += value;
+            }
+        }
+        return sText;
+    }
+
+    std::string formatTokenLine(const nlohmann::json& oToken)
+    {
+        std::string sTokenText;
+        sTokenText += toString(oToken["p"].get<float>(), 2, 4);
+        sTokenText += "|T0:";
+        sTokenText += oToken["t0"].get<std::string>();
+        sTokenText += "|T1:";
+        sTokenText += oToken["t1"].get<std::string>();
+        sTokenText += "|D:";
+        sTokenText += oToken["Dur"].get<std::string>();
+        sTokenText += "|OFS:";
+        sTokenText += oToken["Ofs"].get<std::string>();
+        sTokenText += "|DTW:";
+        sTokenText += oToken["dtw"].get<std::string>();
+        sTokenText += "|";
+
+        sTokenText += rgbToAnsi(oToken["zone_color"].get<std::string>()) + oToken["zone"].get<std::string>() + COLOR_RESET;
+        sTokenText += "|";
+        sTokenText += rgbToAnsi(oToken["state_color"].get<std::string>()) + oToken["state"].get<std::string>() + COLOR_RESET;
+        sTokenText += "|";
+        sTokenText += rgbToAnsi(oToken["dropped_color"].get<std::string>()) + (oToken["dropped"].get<bool>() ? "D" : "U") + COLOR_RESET;
+        sTokenText += "|";
+        sTokenText += rgbToAnsi(oToken["filtered_color"].get<std::string>()) + (oToken["filtered"].get<bool>() ? "F" : "U") + COLOR_RESET;
+        sTokenText += "|";
+        sTokenText += rgbToAnsi(oToken["nonspeech_color"].get<std::string>()) + (oToken["nonspeech"].get<bool>() ? "N" : "T") + COLOR_RESET;
+        sTokenText += "|";
+        sTokenText += rgbToAnsi(oToken["color"].get<std::string>()) + oToken["value"].get<std::string>() + COLOR_RESET;
+        return sTokenText;
+    }
+
+    std::string formatColoredChunkBlock(const std::string& rawBlock)
+    {
+        const auto jConfigCurrent = nlohmann::json::parse(rawBlock);
+        std::ostringstream output;
+
+        if (jConfigCurrent.contains("text"))
+        {
+            const auto& oText = jConfigCurrent["text"];
+            if (oText.is_array())
+            {
+                appendLine(output, formatTextArray(oText));
+            }
+            else
+            {
+                appendLine(output, oText.dump());
             }
 
-            LOG_INFO(sText.c_str());
-
-            // derive the subtitle cue timing from the chunk's absolute stream offset
-            // ("timestamp", HH:MM:SS.mmm) and its length ("duration", milliseconds)
+            // Keep timestamp parsing from the original chunkParser workflow so this
+            // renderer can be extended later without changing how chunk timing is read.
             uint64_t startMs = 0;
             if (jConfigCurrent.contains("timestamp") && jConfigCurrent["timestamp"].is_string())
             {
                 startMs = parseTimestampMs(jConfigCurrent["timestamp"].get<std::string>());
             }
-            uint64_t endMs = startMs;
             if (jConfigCurrent.contains("duration") && jConfigCurrent["duration"].is_number())
             {
-                endMs = startMs + static_cast<uint64_t>(jConfigCurrent["duration"].get<int64_t>());
+                const auto endMs = startMs + static_cast<uint64_t>(jConfigCurrent["duration"].get<int64_t>());
+                (void)endMs;
             }
         }
+
         if (jConfigCurrent.contains("tokens"))
         {
-            auto& oTokens = jConfigCurrent["tokens"];
+            const auto& oTokens = jConfigCurrent["tokens"];
             if (oTokens.is_array())
             {
                 auto oTokensArr = oTokens.get<nlohmann::json::array_t>();
@@ -170,102 +207,36 @@ static void chunkParser(void* userData, const char* data, size_t dataSize)
                     });
                 for (const auto& oToken : oTokensArr)
                 {
-                    std::string sTokenText;
-                    //jToken["segment"] = utils::Utils::toString(token.iSeg_, 2);
-                    //jToken["segment_index"] = utils::Utils::toString(token.j_, 2);
-                    //jToken["p"] = token.token_.p;
-                    //jToken["plog"] = token.token_.plog;
-                    //jToken["vlen"] = token.token_.vlen;
-                    //jToken["pt"] = token.token_.pt;
-                    //jToken["ptsum"] = token.token_.ptsum;
-                    //jToken["dtw"] = utils::Utils::toTimestamp(token.token_.t_dtw, true);
-                    //jToken["t0"] = utils::Utils::toTimestamp(token.token_.t0, true);
-                    //jToken["t1"] = utils::Utils::toTimestamp(token.token_.t1, true);
-                    //int64_t t_dur = token.token_.t1 - token.token_.t0;
-                    //jToken["Dur"] = utils::Utils::toTimestamp(t_dur, true);
-                    //jToken["Ofs"] = utils::Utils::toTimestamp(tot_offset, true);
-                    //jToken["zone"] = zone;
-                    //jToken["zone_color"] = zone_color;
-                    //jToken["state"] = state;
-                    //jToken["state_color"] = state_color;
-                    //jToken["dropped"] = token.dropped_;
-                    //jToken["dropped_color"] = dropped_color;
-                    //jToken["filtered"] = token.filtered_;
-                    //jToken["filtered_color"] = filtered_color;
-                    //jToken["nonspeech"] = token.nonspeech_;
-                    //jToken["nonspeech_color"] = nonspeech_color;
-                    //jToken["value"] = token.token_.value;
-
-                    sTokenText += toString(oToken["p"].get<float>(), 2, 4);
-                    sTokenText += "|T0:";
-                    sTokenText += oToken["t0"].get<std::string>();
-                    sTokenText += "|T1:";
-                    sTokenText += oToken["t1"].get<std::string>();
-                    sTokenText += "|D:";
-                    sTokenText += oToken["Dur"].get<std::string>();
-                    sTokenText += "|OFS:";
-                    sTokenText += oToken["Ofs"].get<std::string>();
-                    sTokenText += "|DTW:";
-                    sTokenText += oToken["dtw"].get<std::string>();
-                    sTokenText += "|";
-
-                    sTokenText += rgbToAnsi1(oToken["zone_color"].get<std::string>()) + oToken["zone"].get<std::string>() + COLOR_RESET;
-                    sTokenText += "|";
-                    sTokenText += rgbToAnsi1(oToken["state_color"].get<std::string>()) + oToken["state"].get<std::string>() + COLOR_RESET;
-                    sTokenText += "|";
-                    sTokenText += rgbToAnsi1(oToken["dropped_color"].get<std::string>()) + (oToken["dropped"].get<bool>() ? "D" : "U") + COLOR_RESET;
-                    sTokenText += "|";
-                    sTokenText += rgbToAnsi1(oToken["filtered_color"].get<std::string>()) + (oToken["filtered"].get<bool>() ? "F" : "U") + COLOR_RESET;
-                    sTokenText += "|";
-                    sTokenText += rgbToAnsi1(oToken["nonspeech_color"].get<std::string>()) + (oToken["nonspeech"].get<bool>() ? "N" : "T") + COLOR_RESET;
-                    sTokenText += "|";
-                    sTokenText += rgbToAnsi1(oToken["color"].get<std::string>()) + oToken["value"].get<std::string>() + COLOR_RESET;
-                    LOG_INFO(sTokenText.c_str());
+                    appendLine(output, formatTokenLine(oToken));
                 }
             }
         }
+
         if (jConfigCurrent.contains("environment"))
         {
-            auto res = jConfigCurrent["environment"].dump();
-            //if (res != "{\"run\":true}") {
-            //    LOG_INFO(jConfigCurrent["environment"].dump().c_str());
-            //}
-            LOG_INFO(jConfigCurrent["environment"].dump().c_str());
+            appendLine(output, jConfigCurrent["environment"].dump());
         }
         if (jConfigCurrent.contains("error"))
         {
-            LOG_ERROR(jConfigCurrent["error"].get<std::string>().c_str());
+            appendLine(output, jConfigCurrent["error"].get<std::string>());
         }
         if (jConfigCurrent.contains("warning"))
         {
-            LOG_WARN(jConfigCurrent["warning"].get<std::string>().c_str());
+            appendLine(output, jConfigCurrent["warning"].get<std::string>());
         }
         if (jConfigCurrent.contains("info"))
         {
-            LOG_INFO(jConfigCurrent.dump().c_str());
+            appendLine(output, jConfigCurrent.dump());
         }
-        //LOG_INFO("------------- END");
-    }
-    catch (const std::exception& ex)
-    {
-        std::string sError = "chunkParser exception [";
-        sError += ex.what();
-        sError += "]";
-        LOG_ERROR(sError.c_str());
-        exit(9); // exit if exception
-    }
-    catch (...)
-    {
-        LOG_ERROR("chunkParser exception");
-        exit(9); // exit if exception
-    }
-}
 
-namespace
-{
+        const std::string formatted = output.str();
+        return formatted.empty() ? rawBlock : formatted;
+    }
 
     enum class Key
     {
+        ArrowUp,
+        ArrowDown,
         PageUp,
         PageDown,
         Quit,
@@ -315,19 +286,25 @@ namespace
         std::cout << "\033[2J\033[H";
     }
 
-    void printHelp()
-    {
-        std::cout << "Keys: PageDown = next object, PageUp = previous object, q/Esc = quit\n";
-    }
-
-    void renderBlock(const JsonBlockPager& pager, const JsonBlockPager::Block& block)
+    void renderBlock(const JsonBlockPager& /*pager*/, const JsonBlockPager::Block& block)
     {
         clearScreen();
-        std::cout << "File: " << pager.path().string() << '\n';
+        //std::cout << "File: " << pager.path().string() << '\n';
         std::cout << "Object: " << (block.index + 1) << " (zero-based index " << block.index << ")\n";
-        printHelp();
         std::cout << "------------------------------------------------------------\n";
-        std::cout << block.raw << "\n";
+        try
+        {
+            const auto renderedBlock = formatColoredChunkBlock(block.raw);
+            std::cout << renderedBlock;
+            if (renderedBlock.empty() || renderedBlock.back() != '\n')
+            {
+                std::cout << '\n';
+            }
+        }
+        catch (const std::exception&)
+        {
+            std::cout << block.raw << '\n';
+        }
         std::cout << "------------------------------------------------------------\n";
         std::cout.flush();
     }
@@ -336,7 +313,6 @@ namespace
     {
         clearScreen();
         std::cout << message << "\n\n";
-        printHelp();
         std::cout.flush();
     }
 
@@ -361,73 +337,44 @@ namespace
 #ifdef _WIN32
         const int ch = _getch();
         if (ch == 'q' || ch == 'Q' || ch == 27)
-        {
             return Key::Quit;
-        }
         if (ch == 0 || ch == 224)
         {
             const int extended = _getch();
-            if (extended == 73)
-            {
-                return Key::PageUp;
-            }
-            if (extended == 81)
-            {
-                return Key::PageDown;
-            }
+            if (extended == 73) return Key::PageUp;
+            if (extended == 81) return Key::PageDown;
+            if (extended == 72) return Key::ArrowUp;
+            if (extended == 80) return Key::ArrowDown;
         }
         return Key::Unknown;
 #else
         char ch = '\0';
         if (::read(STDIN_FILENO, &ch, 1) != 1)
-        {
             return Key::Unknown;
-        }
 
         if (ch == 'q' || ch == 'Q')
-        {
             return Key::Quit;
-        }
-
         if (ch != '\033')
-        {
             return Key::Unknown;
-        }
-
         char introducer = '\0';
         if (!readByteWithTimeout(introducer, 50))
-        {
             return Key::Quit;
-        }
         if (introducer != '[')
-        {
             return Key::Unknown;
-        }
-
         std::string sequence;
         while (sequence.size() < 16)
         {
             char sequenceByte = '\0';
             if (!readByteWithTimeout(sequenceByte, 50))
-            {
                 return Key::Unknown;
-            }
-
             sequence.push_back(sequenceByte);
             if (sequenceByte >= '@' && sequenceByte <= '~')
-            {
                 break;
-            }
         }
-
-        if (sequence == "5~")
-        {
-            return Key::PageUp;
-        }
-        if (sequence == "6~")
-        {
-            return Key::PageDown;
-        }
+        if (sequence == "5~") return Key::PageUp;
+        if (sequence == "6~") return Key::PageDown;
+        if (sequence == "A") return Key::ArrowUp;
+        if (sequence == "B") return Key::ArrowDown;
         return Key::Unknown;
 #endif
     }
@@ -446,13 +393,15 @@ namespace
 
 int main(int argc, char* argv[])
 {
+#ifdef _WIN32
+    SetConsoleOutputCP(65001);
+#endif
+
     if (argc != 2)
     {
         printUsage(argv[0], argv, argc);
         return EXIT_FAILURE;
     }
-
-    std::cout << "Loading file: " << argv[1] << " ...\n";
 
     try
     {
@@ -474,6 +423,8 @@ int main(int argc, char* argv[])
             switch (readKey())
             {
             case Key::PageDown:
+            [[fallthrough]];
+            case Key::ArrowDown:
             {
                 auto next = pager.loadNext();
                 if (next)
@@ -483,11 +434,13 @@ int main(int argc, char* argv[])
                 }
                 else
                 {
-                    renderMessage("End of array. Press PageUp to go back or q to quit.");
+                    renderMessage("End of array. Press PageUp or ArrowUp to go back or q to quit.");
                 }
                 break;
             }
             case Key::PageUp:
+            [[fallthrough]];
+            case Key::ArrowUp:
             {
                 auto previous = pager.loadPrevious();
                 if (previous)
@@ -497,7 +450,7 @@ int main(int argc, char* argv[])
                 }
                 else
                 {
-                    renderMessage("Already at the first object. Press PageDown to continue or q to quit.");
+                    renderMessage("Already at the first object. Press PageDown or ArrowDown to continue or q to quit.");
                 }
                 break;
             }
