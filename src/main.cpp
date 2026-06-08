@@ -434,7 +434,7 @@ int main(int argc, char* argv[])
                 }
                 else
                 {
-                    renderMessage("End of array. Press PageUp to go back or q to quit.");
+                    renderMessage("End of array. Press PageUp or ArrowUp to go back or q to quit.");
                 }
                 break;
             }
@@ -450,7 +450,7 @@ int main(int argc, char* argv[])
                 }
                 else
                 {
-                    renderMessage("Already at the first object. Press PageDown to continue or q to quit.");
+                    renderMessage("Already at the first object. Press PageDown or ArrowDown to continue or q to quit.");
                 }
                 break;
             }
