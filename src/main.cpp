@@ -130,27 +130,31 @@ Key readKey() {
         return Key::Unknown;
     }
 
-    char seq[5]{};
-    if (!readByteWithTimeout(seq[0], 50)) {
+    char introducer = '\0';
+    if (!readByteWithTimeout(introducer, 50)) {
         return Key::Quit;
     }
-    if (seq[0] != '[') {
-        return Key::Unknown;
-    }
-    if (::read(STDIN_FILENO, &seq[1], 1) != 1) {
-        return Key::Unknown;
-    }
-    if (::read(STDIN_FILENO, &seq[2], 1) != 1) {
+    if (introducer != '[') {
         return Key::Unknown;
     }
 
-    if (seq[2] != '~') {
-        return Key::Unknown;
+    std::string sequence;
+    while (sequence.size() < 16) {
+        char sequenceByte = '\0';
+        if (!readByteWithTimeout(sequenceByte, 50)) {
+            return Key::Unknown;
+        }
+
+        sequence.push_back(sequenceByte);
+        if (sequenceByte >= '@' && sequenceByte <= '~') {
+            break;
+        }
     }
-    if (seq[1] == '5') {
+
+    if (sequence == "5~") {
         return Key::PageUp;
     }
-    if (seq[1] == '6') {
+    if (sequence == "6~") {
         return Key::PageDown;
     }
     return Key::Unknown;
