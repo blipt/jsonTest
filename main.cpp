@@ -16,15 +16,27 @@
 
 #ifdef HAS_CURSES
 #include <curses.h>
-#elif defined(_WIN32)
-#include <Windows.h>
-#include <conio.h>
-#include <consoleapi2.h>
-#include <fcntl.h>
+#endif
+
+#ifdef _WIN32
+#pragma warning(push)
+#pragma warning(disable : 4710)
+#pragma warning(disable : 4711)
+#pragma warning(disable : 4865)
+#pragma warning(disable : 5039)
+#pragma warning(disable : 5045)
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#   include <Windows.h>
+#pragma warning(pop)
+#   include <consoleapi2.h>
+#   include <fcntl.h>
+//#   include <conio.h>
 #else
-#include <sys/select.h>
-#include <termios.h>
-#include <unistd.h>
+#   include <unistd.h>
+#   include <termios.h>
+#   include <sys/select.h>
+#   include <dlfcn.h>
 #endif
 
 #include "jsonWrapper.hpp"
@@ -169,7 +181,11 @@ CursesKey readCursesKey()
     
     if (ch == KEY_MOUSE)
     {
+#ifdef PDCURSES
+        if (nc_getmouse(&mouseEvent) == OK)
+#else
         if (getmouse(&mouseEvent) == OK)
+#endif
         {
             if (mouseEvent.bstate & BUTTON4_PRESSED)
                 return CursesKey::WheelUp;
@@ -462,6 +478,10 @@ int mainLegacyMode(int argc, char* argv[])
 
 int main(int argc, char* argv[])
 {
+#if defined(_WIN32)
+    SetConsoleOutputCP(65001);
+#endif
+
 #ifdef HAS_CURSES
     return mainCursesMode(argc, argv);
 #else

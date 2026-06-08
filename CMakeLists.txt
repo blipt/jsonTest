@@ -1,26 +1,23 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(json_stream_viewer VERSION 1.0.0 LANGUAGES C CXX)
+if(CMAKE_HOST_WIN32)
+    set(TOOLKITS_DIR "win")
+elseif(CMAKE_HOST_UNIX AND NOT CMAKE_HOST_APPLE)
+    set(TOOLKITS_DIR "lin")
+endif()
 
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
-
-if(MSVC)
-    if(WIN32)
-        set(TOOLKITS_DIR "win")
-    elseif(UNIX AND NOT APPLE)
-        set(TOOLKITS_DIR "lin")
-    endif()
+if(DEFINED TOOLKITS_DIR)
     set(TOOLKIT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/obj/${TOOLKITS_DIR}/toolkits")
     message(STATUS ">>> TOOLKIT_DIR [${TOOLKIT_DIR}]")
     set(VCPKG_ROOT_DIR "${TOOLKIT_DIR}/vcpkg")
-    if(WIN32)
+    if(CMAKE_HOST_WIN32)
         set(VCPKG_EXECUTABLE "${VCPKG_ROOT_DIR}/vcpkg.exe")
         set(VCPKG_BOOTSTRAP  "${VCPKG_ROOT_DIR}/bootstrap-vcpkg.bat")
+        set(VCPKG_TARGET_TRIPLET "x64-windows")
     else()
         set(VCPKG_EXECUTABLE "${VCPKG_ROOT_DIR}/vcpkg")
         set(VCPKG_BOOTSTRAP  "${VCPKG_ROOT_DIR}/bootstrap-vcpkg.sh")
+        set(VCPKG_TARGET_TRIPLET "x64-linux")
     endif()
     # Clone vcpkg if it is not already present.
     if(NOT EXISTS "${VCPKG_ROOT_DIR}/bootstrap-vcpkg.sh" AND NOT EXISTS "${VCPKG_ROOT_DIR}/bootstrap-vcpkg.bat")
@@ -45,14 +42,9 @@ if(MSVC)
             message(FATAL_ERROR ">>> vcpkg bootstrap failed [${_vcpkg_bs_result}]")
         endif()
     endif()
-    if(WIN32)
-        set(VCPKG_TARGET_TRIPLET "x64-windows")
-    elseif(UNIX AND NOT APPLE)
-        set(VCPKG_TARGET_TRIPLET "x64-linux")
-    endif()
+    
     execute_process(COMMAND ${VCPKG_EXECUTABLE} install 
         --vcpkg-root ${VCPKG_ROOT_DIR}
-        #--no-print-usage
         pdcurses:${VCPKG_TARGET_TRIPLET}
         RESULT_VARIABLE RESULT
     ) 
@@ -60,20 +52,19 @@ if(MSVC)
         message(FATAL_ERROR ">>> 'Vcpkg.exe' install failed [${RESULT}]")
     endif()
     if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
-        set(CMAKE_TOOLCHAIN_FILE "${VCPKG_ROOT_DIR}/scripts/buildsystems/vcpkg.cmake")
+        set(CMAKE_TOOLCHAIN_FILE "${VCPKG_ROOT_DIR}/scripts/buildsystems/vcpkg.cmake" CACHE STRING "Vcpkg toolchain file")
         if(NOT EXISTS "${CMAKE_TOOLCHAIN_FILE}")
             message(FATAL_ERROR ">>> CMAKE_TOOLCHAIN_FILE not found at [${CMAKE_TOOLCHAIN_FILE}]")
         endif()
         message(STATUS ">>> CMAKE_TOOLCHAIN_FILE [${CMAKE_TOOLCHAIN_FILE}]")
     endif()
-    find_package(unofficial-pdcurses CONFIG REQUIRED)
-    target_link_libraries(main PRIVATE unofficial::pdcurses::pdcurses)
-else()
-    find_package(Curses REQUIRED)
-    target_link_libraries(main PRIVATE ${CURSES_LIBRARIES})
 endif()
 
-set(HAS_CURSES TRUE)
+project(json_stream_viewer VERSION 1.0.0 LANGUAGES C CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_executable(json_stream_viewer
     "main.cpp"
@@ -82,14 +73,17 @@ add_executable(json_stream_viewer
 
 target_compile_features(json_stream_viewer PRIVATE cxx_std_20)
 
-if(CURSES_FOUND)
-    target_include_directories(json_stream_viewer PRIVATE ${CURSES_INCLUDE_DIR})
-    target_link_libraries(json_stream_viewer ${CURSES_LIBRARIES})
-    target_compile_definitions(json_stream_viewer PRIVATE HAS_CURSES)
-endif()
-
 if(MSVC)
+    find_package(unofficial-pdcurses CONFIG REQUIRED)
+    target_link_libraries(json_stream_viewer PRIVATE unofficial::pdcurses::pdcurses)
+    target_compile_definitions(json_stream_viewer PRIVATE HAS_CURSES)
     target_compile_options(json_stream_viewer PRIVATE /W4 /permissive-)
 else()
+    find_package(Curses REQUIRED)
+    if(CURSES_FOUND)
+        target_include_directories(json_stream_viewer PRIVATE ${CURSES_INCLUDE_DIR})
+        target_link_libraries(json_stream_viewer PRIVATE ${CURSES_LIBRARIES})
+        target_compile_definitions(json_stream_viewer PRIVATE HAS_CURSES)
+    endif()
     target_compile_options(json_stream_viewer PRIVATE -Wall -Wextra -Wpedantic)
 endif()
