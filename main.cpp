@@ -35,6 +35,8 @@
 static std::vector<std::string> g_allLines;
 static int g_scrollOffset = 0;
 static int g_maxScroll = 0;
+static JsonBlockPager* g_pager = nullptr;
+static std::optional<JsonBlockPager::Block> g_currentBlock;
 
 void initCurses()
 {
@@ -108,7 +110,7 @@ void buildAllLines(const JsonBlockPager& /*pager*/, const JsonBlockPager::Block&
     
     // Footer
     g_allLines.push_back("");
-    g_allLines.push_back("Navigation: Up/Down - line, PgUp/PgDn - page, Mouse wheel - scroll, q - quit");
+    g_allLines.push_back("Navigation: Up/Down - next/prev object, PgUp/PgDn - page, Mouse wheel - scroll, q - quit");
     
     // Calculate max scroll
     int height = 0;
@@ -196,34 +198,55 @@ CursesKey readCursesKey()
     }
 }
 
-void handleInput(CursesKey key, int height)
+bool handleInput(CursesKey key, int height)
 {
     switch (key)
     {
         case CursesKey::ArrowUp:
-            if (g_scrollOffset > 0)
-                --g_scrollOffset;
+            // Navigate to previous object
+            if (g_pager)
+            {
+                auto previous = g_pager->loadPrevious();
+                if (previous)
+                {
+                    g_currentBlock = std::move(previous);
+                    buildAllLines(*g_pager, *g_currentBlock);
+                    g_scrollOffset = 0;
+                    return true;
+                }
+            }
             break;
         case CursesKey::ArrowDown:
-            if (g_scrollOffset < g_maxScroll)
-                ++g_scrollOffset;
+            // Navigate to next object
+            if (g_pager)
+            {
+                auto next = g_pager->loadNext();
+                if (next)
+                {
+                    g_currentBlock = std::move(next);
+                    buildAllLines(*g_pager, *g_currentBlock);
+                    g_scrollOffset = 0;
+                    return true;
+                }
+            }
             break;
         case CursesKey::PageUp:
             g_scrollOffset = std::max(0, g_scrollOffset - height + 2);
-            break;
+            return true;
         case CursesKey::PageDown:
             g_scrollOffset = std::min(g_maxScroll, g_scrollOffset + height - 2);
-            break;
+            return true;
         case CursesKey::WheelUp:
             g_scrollOffset = std::max(0, g_scrollOffset - 3);
-            break;
+            return true;
         case CursesKey::WheelDown:
             g_scrollOffset = std::min(g_maxScroll, g_scrollOffset + 3);
-            break;
+            return true;
         case CursesKey::Quit:
         case CursesKey::Unknown:
             break;
     }
+    return false;
 }
 
 int mainCursesMode(int argc, char* argv[])
@@ -237,6 +260,7 @@ int mainCursesMode(int argc, char* argv[])
     try
     {
         JsonBlockPager pager(argv[1]);
+        g_pager = &pager;
         std::optional<JsonBlockPager::Block> block = pager.loadCurrent();
         
         initCurses();
@@ -257,6 +281,7 @@ int mainCursesMode(int argc, char* argv[])
             return EXIT_SUCCESS;
         }
         
+        g_currentBlock = block;
         buildAllLines(pager, *block);
         
         bool running = true;
@@ -282,6 +307,7 @@ int mainCursesMode(int argc, char* argv[])
         }
         
         cleanupCurses();
+        g_pager = nullptr;
         return EXIT_SUCCESS;
     }
     catch (const std::exception& ex)
