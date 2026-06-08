@@ -243,44 +243,6 @@ namespace
         Unknown,
     };
 
-    class TerminalRawMode
-    {
-    public:
-        TerminalRawMode()
-        {
-#ifndef _WIN32
-            if (tcgetattr(STDIN_FILENO, &original_) == 0)
-            {
-                enabled_ = true;
-                termios raw = original_;
-                raw.c_lflag &= static_cast<unsigned int>(~(ICANON | ECHO));
-                raw.c_cc[VMIN] = 1;
-                raw.c_cc[VTIME] = 0;
-                tcsetattr(STDIN_FILENO, TCSANOW, &raw);
-            }
-#endif
-        }
-
-        TerminalRawMode(const TerminalRawMode&) = delete;
-        TerminalRawMode& operator=(const TerminalRawMode&) = delete;
-
-        ~TerminalRawMode()
-        {
-#ifndef _WIN32
-            if (enabled_)
-            {
-                tcsetattr(STDIN_FILENO, TCSANOW, &original_);
-            }
-#endif
-        }
-
-    private:
-#ifndef _WIN32
-        termios original_{};
-        bool enabled_{ false };
-#endif
-    };
-
     void clearScreen()
     {
         std::cout << "\033[2J\033[H";
@@ -316,25 +278,8 @@ namespace
         std::cout.flush();
     }
 
-#ifndef _WIN32
-    bool readByteWithTimeout(char& ch, int timeoutMilliseconds)
-    {
-        fd_set readSet;
-        FD_ZERO(&readSet);
-        FD_SET(STDIN_FILENO, &readSet);
-
-        timeval timeout{};
-        timeout.tv_sec = timeoutMilliseconds / 1000;
-        timeout.tv_usec = (timeoutMilliseconds % 1000) * 1000;
-
-        const int ready = ::select(STDIN_FILENO + 1, &readSet, nullptr, nullptr, &timeout);
-        return ready > 0 && ::read(STDIN_FILENO, &ch, 1) == 1;
-    }
-#endif
-
     Key readKey()
     {
-#ifdef _WIN32
         const int ch = _getch();
         if (ch == 'q' || ch == 'Q' || ch == 27)
             return Key::Quit;
@@ -347,46 +292,6 @@ namespace
             if (extended == 80) return Key::ArrowDown;
         }
         return Key::Unknown;
-#else
-        char ch = '\0';
-        if (::read(STDIN_FILENO, &ch, 1) != 1)
-            return Key::Unknown;
-
-        if (ch == 'q' || ch == 'Q')
-            return Key::Quit;
-        if (ch != '\033')
-            return Key::Unknown;
-        char introducer = '\0';
-        if (!readByteWithTimeout(introducer, 50))
-            return Key::Quit;
-        if (introducer != '[')
-            return Key::Unknown;
-        std::string sequence;
-        while (sequence.size() < 16)
-        {
-            char sequenceByte = '\0';
-            if (!readByteWithTimeout(sequenceByte, 50))
-                return Key::Unknown;
-            sequence.push_back(sequenceByte);
-            if (sequenceByte >= '@' && sequenceByte <= '~')
-                break;
-        }
-        if (sequence == "5~") return Key::PageUp;
-        if (sequence == "6~") return Key::PageDown;
-        if (sequence == "A") return Key::ArrowUp;
-        if (sequence == "B") return Key::ArrowDown;
-        return Key::Unknown;
-#endif
-    }
-
-    void printUsage(const char* executable, char* argv[], int argc)
-    {
-        std::cerr << "Usage: " << executable << " <path-to-json-array-file>\n";
-        std::cerr << "The file must have the top-level shape: [{...},{...},...]\n";
-        for (int i = 1; i < argc; ++i)
-        {
-            std::cerr << "  argv[" << i << "] = " << argv[i] << '\n';
-        }
     }
 
 } // namespace
@@ -399,15 +304,13 @@ int main(int argc, char* argv[])
 
     if (argc != 2)
     {
-        printUsage(argv[0], argv, argc);
+        std::cerr << "Usage: " << argv[0] << " <path-to-json-array-file>\n";
         return EXIT_FAILURE;
     }
 
     try
     {
         JsonBlockPager pager(argv[1]);
-        TerminalRawMode rawMode;
-
         std::optional<JsonBlockPager::Block> block = pager.loadCurrent();
         if (!block)
         {
