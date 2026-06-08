@@ -233,6 +233,11 @@ namespace
         return formatted.empty() ? rawBlock : formatted;
     }
 
+    void clearScreen()
+    {
+        std::cout << "\033[2J\033[H";
+    }
+
     enum class Key
     {
         ArrowUp,
@@ -242,11 +247,6 @@ namespace
         Quit,
         Unknown,
     };
-
-    void clearScreen()
-    {
-        std::cout << "\033[2J\033[H";
-    }
 
     void renderBlock(const JsonBlockPager& /*pager*/, const JsonBlockPager::Block& block)
     {
