@@ -4,7 +4,7 @@ project(json_stream_viewer VERSION 1.0.0 LANGUAGES C CXX)
 
 add_executable(json_stream_viewer
     src/main.cpp
-    src/JsonBlockPager.cpp
+    "JsonBlockPager.cpp"
 )
 
 target_include_directories(json_stream_viewer PRIVATE include)
