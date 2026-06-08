@@ -1,0 +1,15 @@
+{
+  "version": "0.2.1",
+  "defaults": {},
+  "configurations": [
+    {
+      "type": "default",
+      "project": "CMakeLists.txt",
+      "projectTarget": "json_stream_viewer.exe",
+      "name": "json_stream_viewer.exe",
+      "args": [
+        "\"e:/tmp/2026_06_08T01_53_34.650+0200_  41.json\""
+      ]
+    }
+  ]
+}
