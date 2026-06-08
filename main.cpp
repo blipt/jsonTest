@@ -12,23 +12,287 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <vector>
 
-#ifdef _WIN32
-
+#ifdef HAS_CURSES
+#include <curses.h>
+#elif defined(_WIN32)
 #include <Windows.h>
 #include <conio.h>
 #include <consoleapi2.h>
 #include <fcntl.h>
-
 #else
-
 #include <sys/select.h>
 #include <termios.h>
 #include <unistd.h>
-
 #endif
 
-#include "jsonWrapper.hpp" // for nlohmann::json
+#include "jsonWrapper.hpp"
+
+#ifdef HAS_CURSES
+
+// Global state for curses-based viewer
+static std::vector<std::string> g_allLines;
+static int g_scrollOffset = 0;
+static int g_maxScroll = 0;
+
+void initCurses()
+{
+    initscr();
+    cbreak();
+    noecho();
+    keypad(stdscr, TRUE);
+    
+    // Enable mouse support
+    mousemask(ALL_MOUSE_EVENTS | REPORT_MOUSE_POSITION, NULL);
+    mouseinterval(0);
+    
+    // Enable scrolling
+    scrollok(stdscr, TRUE);
+    
+    // Hide cursor
+    curs_set(0);
+    
+    // Enable color if terminal supports it
+    if (has_colors())
+    {
+        start_color();
+        use_default_colors();
+    }
+}
+
+void cleanupCurses()
+{
+    endwin();
+}
+
+void buildAllLines(const JsonBlockPager& /*pager*/, const JsonBlockPager::Block& block)
+{
+    g_allLines.clear();
+    
+    // Header line
+    std::ostringstream header;
+    header << "Object: " << (block.index + 1) << " (zero-based index " << block.index << ")";
+    g_allLines.push_back(header.str());
+    
+    // Separator
+    g_allLines.push_back("------------------------------------------------------------");
+    
+    // Content
+    try
+    {
+        const auto renderedBlock = formatColoredChunkBlock(block.raw);
+        std::istringstream iss(renderedBlock);
+        std::string line;
+        while (std::getline(iss, line))
+        {
+            g_allLines.push_back(line);
+        }
+        if (renderedBlock.empty() || renderedBlock.back() != '\n')
+        {
+            g_allLines.push_back("");
+        }
+    }
+    catch (const std::exception&)
+    {
+        std::istringstream iss(block.raw);
+        std::string line;
+        while (std::getline(iss, line))
+        {
+            g_allLines.push_back(line);
+        }
+    }
+    
+    // Separator
+    g_allLines.push_back("------------------------------------------------------------");
+    
+    // Footer
+    g_allLines.push_back("");
+    g_allLines.push_back("Navigation: Up/Down - line, PgUp/PgDn - page, Mouse wheel - scroll, q - quit");
+    
+    // Calculate max scroll
+    int height = 0;
+    int width = 0;
+    getmaxyx(stdscr, height, width);
+    (void)width;
+    g_maxScroll = static_cast<int>(g_allLines.size()) > height 
+                  ? static_cast<int>(g_allLines.size()) - height 
+                  : 0;
+}
+
+void renderView()
+{
+    clear();
+    
+    int height = 0;
+    int width = 0;
+    getmaxyx(stdscr, height, width);
+    (void)width;
+    
+    // Render visible lines based on scroll offset
+    for (int i = 0; i < height && (g_scrollOffset + i) < static_cast<int>(g_allLines.size()); ++i)
+    {
+        mvaddstr(i, 0, g_allLines[g_scrollOffset + i].c_str());
+    }
+    
+    // Show scroll position indicator
+    if (g_maxScroll > 0)
+    {
+        int pos = g_maxScroll > 0 ? (g_scrollOffset * 100 / g_maxScroll) : 0;
+        std::string status = "Scroll: " + std::to_string(pos) + "% (" + 
+                            std::to_string(g_scrollOffset + 1) + "/" + 
+                            std::to_string(g_maxScroll + height) + ")";
+        mvaddstr(height - 1, 0, status.c_str());
+    }
+    
+    refresh();
+}
+
+enum class CursesKey
+{
+    ArrowUp,
+    ArrowDown,
+    PageUp,
+    PageDown,
+    WheelUp,
+    WheelDown,
+    Quit,
+    Unknown,
+};
+
+CursesKey readCursesKey()
+{
+    MEVENT mouseEvent;
+    int ch = getch();
+    
+    if (ch == KEY_MOUSE)
+    {
+        if (getmouse(&mouseEvent) == OK)
+        {
+            if (mouseEvent.bstate & BUTTON4_PRESSED)
+                return CursesKey::WheelUp;
+            if (mouseEvent.bstate & BUTTON5_PRESSED)
+                return CursesKey::WheelDown;
+        }
+        return CursesKey::Unknown;
+    }
+    
+    switch (ch)
+    {
+        case 'q':
+        case 'Q':
+        case 27: // ESC
+            return CursesKey::Quit;
+        case KEY_UP:
+            return CursesKey::ArrowUp;
+        case KEY_DOWN:
+            return CursesKey::ArrowDown;
+        case KEY_PPAGE:
+            return CursesKey::PageUp;
+        case KEY_NPAGE:
+            return CursesKey::PageDown;
+        default:
+            return CursesKey::Unknown;
+    }
+}
+
+void handleInput(CursesKey key, int height)
+{
+    switch (key)
+    {
+        case CursesKey::ArrowUp:
+            if (g_scrollOffset > 0)
+                --g_scrollOffset;
+            break;
+        case CursesKey::ArrowDown:
+            if (g_scrollOffset < g_maxScroll)
+                ++g_scrollOffset;
+            break;
+        case CursesKey::PageUp:
+            g_scrollOffset = std::max(0, g_scrollOffset - height + 2);
+            break;
+        case CursesKey::PageDown:
+            g_scrollOffset = std::min(g_maxScroll, g_scrollOffset + height - 2);
+            break;
+        case CursesKey::WheelUp:
+            g_scrollOffset = std::max(0, g_scrollOffset - 3);
+            break;
+        case CursesKey::WheelDown:
+            g_scrollOffset = std::min(g_maxScroll, g_scrollOffset + 3);
+            break;
+        case CursesKey::Quit:
+        case CursesKey::Unknown:
+            break;
+    }
+}
+
+int mainCursesMode(int argc, char* argv[])
+{
+    if (argc != 2)
+    {
+        std::cerr << "Usage: " << argv[0] << " <path-to-json-array-file>\n";
+        return EXIT_FAILURE;
+    }
+
+    try
+    {
+        JsonBlockPager pager(argv[1]);
+        std::optional<JsonBlockPager::Block> block = pager.loadCurrent();
+        
+        initCurses();
+        
+        if (!block)
+        {
+            mvaddstr(0, 0, "No object blocks were found in the array.");
+            mvaddstr(2, 0, "Press 'q' to quit.");
+            refresh();
+            
+            while (true)
+            {
+                int ch = getch();
+                if (ch == 'q' || ch == 'Q' || ch == 27)
+                    break;
+            }
+            cleanupCurses();
+            return EXIT_SUCCESS;
+        }
+        
+        buildAllLines(pager, *block);
+        
+        bool running = true;
+        while (running)
+        {
+            renderView();
+            
+            int height = 0;
+            int width = 0;
+            getmaxyx(stdscr, height, width);
+            (void)width;
+            
+            CursesKey key = readCursesKey();
+            
+            if (key == CursesKey::Quit)
+            {
+                running = false;
+            }
+            else
+            {
+                handleInput(key, height);
+            }
+        }
+        
+        cleanupCurses();
+        return EXIT_SUCCESS;
+    }
+    catch (const std::exception& ex)
+    {
+        cleanupCurses();
+        std::cerr << "Error: " << ex.what() << '\n';
+        return EXIT_FAILURE;
+    }
+}
+
+#else // Non-curses fallback (original behavior)
 
 enum class Key
 {
@@ -43,7 +307,6 @@ enum class Key
 void renderBlock(const JsonBlockPager& /*pager*/, const JsonBlockPager::Block& block)
 {
     clearScreen();
-    //std::cout << "File: " << pager.path().string() << '\n';
     std::cout << "Object: " << (block.index + 1) << " (zero-based index " << block.index << ")\n";
     std::cout << "------------------------------------------------------------\n";
     try
@@ -60,6 +323,7 @@ void renderBlock(const JsonBlockPager& /*pager*/, const JsonBlockPager::Block& b
         std::cout << block.raw << '\n';
     }
     std::cout << "------------------------------------------------------------\n";
+    std::cout << "\nUse arrow keys or PageUp/PageDown to navigate, 'q' to quit.\n";
     std::cout.flush();
 }
 
@@ -67,11 +331,13 @@ void renderMessage(const std::string& message)
 {
     clearScreen();
     std::cout << message << "\n\n";
+    std::cout << "Press 'q' to quit.\n";
     std::cout.flush();
 }
 
 Key readKey()
 {
+#ifdef _WIN32
     const int ch = _getch();
     if (ch == 'q' || ch == 'Q' || ch == 27)
         return Key::Quit;
@@ -84,9 +350,13 @@ Key readKey()
         if (extended == 80) return Key::ArrowDown;
     }
     return Key::Unknown;
+#else
+    // Simple fallback for non-Windows without curses
+    return Key::Unknown;
+#endif
 }
 
-int main(int argc, char* argv[])
+int mainLegacyMode(int argc, char* argv[])
 {
 #ifdef _WIN32
     SetConsoleOutputCP(65001);
@@ -160,4 +430,15 @@ int main(int argc, char* argv[])
         std::cerr << "Error: " << ex.what() << '\n';
         return EXIT_FAILURE;
     }
+}
+
+#endif // HAS_CURSES
+
+int main(int argc, char* argv[])
+{
+#ifdef HAS_CURSES
+    return mainCursesMode(argc, argv);
+#else
+    return mainLegacyMode(argc, argv);
+#endif
 }
