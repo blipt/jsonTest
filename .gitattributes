@@ -1,0 +1,15 @@
+# Set default behavior to automatically normalize line endings
+* text=auto
+
+# Force bash/sh scripts to always use LF line endings
+*.sh text eol=lf
+*.bash text eol=lf
+
+# Make sure Docker-related files use LF
+Dockerfile text eol=lf
+*.dockerfile text eol=lf
+docker-compose.yml text eol=lf
+docker-compose.yaml text eol=lf
+
+# PowerShell scripts - use CRLF on Windows systems
+*.ps1 text eol=crlf
