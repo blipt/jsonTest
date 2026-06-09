@@ -4,20 +4,14 @@
 #define NOMINMAX
 
 #   include <Windows.h>
-
 #   include <conio.h>
-
 #   include <consoleapi2.h>
-
 #   include <fcntl.h>
-
 #else
 #   include <dlfcn.h>
-
+#   include <sys/ioctl.h>
 #   include <sys/select.h>
-
 #   include <termios.h>
-
 #   include <unistd.h>
 #endif
 
@@ -26,6 +20,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
+#include <deque>
 #include <exception>
 #include <iostream>
 #include <stdexcept>
@@ -33,45 +28,166 @@
 #include <utility>
 #include <vector>
 
-enum class Key
+class LinePager
 {
-    ArrowUp,
-    ArrowDown,
-    PageUp,
-    PageDown,
-    Quit,
-    Unknown,
-};
-
-static void renderBlock(JsonBlockPager& pager, Key key, int64_t& currentIndex)
-{
-    try
+public:
+    static constexpr int CACHE_CAPACITY = 64;
+    explicit LinePager(JsonBlockPager& pager) : m_pager(pager)
     {
-        switch (key)
+        if (pager.totalBlocks() > 0)ensureCached(0);     // прогрев: первый блок уже в кэше
+    }
+    // Прокрутка: delta > 0 — вниз, delta < 0 — вверх.
+    void scroll(int64_t delta)
+    {
+        if (delta > 0) moveForward(delta);
+        else if (delta < 0) moveBackward(-delta);
+    }
+    // Вернуть до `rows` строк начиная с текущей позиции.
+    std::vector<std::string> visibleLines(int rows)
+    {
+        std::vector<std::string> out;
+        out.reserve(rows);
+
+        int64_t blk = m_blockIdx;
+        int64_t ln  = m_lineInBlock;
+
+        while (static_cast<int>(out.size()) < rows
+               && blk < m_pager.totalBlocks())
         {
-        case Key::ArrowUp:currentIndex--; break;
-        case Key::ArrowDown:currentIndex++; break;
-        case Key::PageUp:currentIndex -= 20; break;
-        case Key::PageDown:currentIndex += 20; break;
-        case Key::Quit: return;
-        case Key::Unknown: return;
-        default: return;
+            ensureCached(blk);   // гарантируем наличие в кэше
+            // Линейный поиск по маленькому кэшу (CACHE_CAPACITY элементов)
+            for (const auto& cb : m_cache)
+            {
+                if (cb.idx != blk) continue;
+                while (ln < static_cast<int64_t>(cb.lines.size())
+                       && static_cast<int>(out.size()) < rows)
+                {
+                    out.push_back(cb.lines[ln++]);
+                }
+                break;
+            }
+            ++blk;
+            ln = 0;
         }
-        currentIndex = std::clamp(currentIndex, int64_t(0), static_cast<int64_t>(pager.totalBlocks()) - 1);
-        std::vector<std::string> strings = std::move(pager.loadBlock(currentIndex));
-        // Clear screen and move cursor to home position and print header
-        std::cout << "\033[2J\033[H=== " << (currentIndex) << " / " << (pager.totalBlocks()) << " ===\n";
-        for (const auto& line : strings)
-            std::cout << line << '\n';
+        return out;
     }
-    catch (const std::exception&)
+    int64_t totalBlocks()      const { return m_pager.totalBlocks(); }
+    int64_t currentBlock()     const { return m_blockIdx; }
+    int64_t currentLineInBlock() const { return m_lineInBlock; }
+private:
+    struct CachedBlock
     {
-        std::cout << "\033[31m" << "Error rendering block" << "\033[0m" << '\n'; // Red
+        int64_t                  idx = -1;
+        std::vector<std::string> lines;
+    };
+    JsonBlockPager&         m_pager;
+    std::deque<CachedBlock> m_cache;             // скользящее окно блоков
+    int64_t                 m_blockIdx    = 0;
+    int64_t                 m_lineInBlock = 0;
+    bool isCached(int64_t idx) const
+    {
+        for (const auto& cb : m_cache)
+            if (cb.idx == idx) return true;
+        return false;
     }
-    std::cout.flush();
+    void ensureCached(int64_t idx)
+    {
+        if (idx < 0 || idx >= m_pager.totalBlocks()) return;
+        if (isCached(idx)) return;
+        // Вытесняем блок, наиболее удалённый от текущей позиции.
+        if (static_cast<int>(m_cache.size()) >= CACHE_CAPACITY)
+        {
+            auto victim  = m_cache.begin();
+            int64_t maxD = 0;
+            for (auto it = m_cache.begin(); it != m_cache.end(); ++it)
+            {
+                int64_t d = it->idx >= m_blockIdx
+                            ? it->idx - m_blockIdx
+                            : m_blockIdx - it->idx;
+                if (d > maxD) { maxD = d; victim = it; }
+            }
+            m_cache.erase(victim);   // итераторы инвалидируются, ссылки — нет
+        }
+        m_cache.push_back({idx, m_pager.loadBlock(idx)});
+    }
+    // Количество строк в блоке (загружает блок при необходимости).
+    int64_t blockLineCount(int64_t idx)
+    {
+        ensureCached(idx);
+        for (const auto& cb : m_cache)
+            if (cb.idx == idx) return static_cast<int64_t>(cb.lines.size());
+        return 0;
+    }
+    // ------------------------------------------------------------------
+    // Навигация
+    // ------------------------------------------------------------------
+    // Вперёд на `delta` строк (зажимаем на последней строке файла).
+    void moveForward(int64_t delta)
+    {
+        while (delta > 0)
+        {
+            const int64_t N = blockLineCount(m_blockIdx);
+            if (N == 0) return;   // пустой блок — останавливаемся
+            // Строк впереди в текущем блоке (не считая текущую).
+            const int64_t available = N - 1 - m_lineInBlock;
+            if (delta <= available)
+            {
+                m_lineInBlock += delta;
+                return;
+            }
+            // Переходим в следующий блок.
+            if (m_blockIdx + 1 >= m_pager.totalBlocks())
+            {
+                m_lineInBlock = N - 1;   // зажимаем: конец файла
+                return;
+            }
+            delta -= available + 1;      // расходуем остаток блока + шаг границы
+            ++m_blockIdx;
+            m_lineInBlock = 0;
+        }
+    }
+    // Назад на `delta` строк (зажимаем на самой первой строке файла).
+    void moveBackward(int64_t delta)
+    {
+        while (delta > 0)
+        {
+            if (delta <= m_lineInBlock)
+            {
+                m_lineInBlock -= delta;
+                return;
+            }
+            // Переходим в предыдущий блок.
+            if (m_blockIdx == 0)
+            {
+                m_lineInBlock = 0;       // зажимаем: начало файла
+                return;
+            }
+            delta -= m_lineInBlock + 1;  // расходуем строки до начала блока + шаг
+            --m_blockIdx;
+            const int64_t N = blockLineCount(m_blockIdx);
+            m_lineInBlock = (N > 0) ? N - 1 : 0;
+        }
+    }
+};
+// ============================================================
+// Вспомогательные функции терминала
+// ============================================================
+// Возвращает высоту терминала в строках (fallback — 24).
+static int terminalRows()
+{
+#ifdef _WIN32
+    CONSOLE_SCREEN_BUFFER_INFO csbi{};
+    if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi))
+        return csbi.srWindow.Bottom - csbi.srWindow.Top + 1;
+    return 24;
+#else
+    struct winsize ws{};
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_row > 1)
+        return static_cast<int>(ws.ws_row);
+    return 24;
+#endif
 }
-
-
+enum class Key { ArrowUp, ArrowDown, PageUp, PageDown, Quit, Unknown };
 #ifndef _WIN32
 class RawTerminal
 {
@@ -81,21 +197,18 @@ public:
     {
         tcgetattr(STDIN_FILENO, &m_saved);
         termios raw = m_saved;
-        raw.c_lflag &= ~(ICANON | ECHO);// disable canonical mode and echo
-        raw.c_cc[VMIN] = 1;             // block until 1 byte arrives
-        raw.c_cc[VTIME] = 0;            // no timeout
+        raw.c_lflag &= ~(ICANON | ECHO);
+        raw.c_cc[VMIN]  = 1;
+        raw.c_cc[VTIME] = 0;
         tcsetattr(STDIN_FILENO, TCSANOW, &raw);
     }
-    ~RawTerminal()
-    {
-        tcsetattr(STDIN_FILENO, TCSANOW, &m_saved);
-    }
+    ~RawTerminal() { tcsetattr(STDIN_FILENO, TCSANOW, &m_saved); }
 };
 
 static int readByte()
 {
     unsigned char c{};
-    return (read(STDIN_FILENO, &c, 1) == 1) ? c : -1;
+    return (read(STDIN_FILENO, &c, 1) == 1) ? static_cast<int>(c) : -1;
 }
 #endif
 
@@ -103,33 +216,30 @@ static Key readKey()
 {
 #ifdef _WIN32
     const int ch = _getch();
-    if (ch == 'q' || ch == 'Q')
-        return Key::Quit;
+    if (ch == 'q' || ch == 'Q') return Key::Quit;
     if (ch == 0 || ch == 224)
     {
-        const int extended = _getch();
-        if (extended == 73) return Key::PageUp;
-        if (extended == 81) return Key::PageDown;
-        if (extended == 72) return Key::ArrowUp;
-        if (extended == 80) return Key::ArrowDown;
+        const int ext = _getch();
+        if (ext == 73) return Key::PageUp;
+        if (ext == 81) return Key::PageDown;
+        if (ext == 72) return Key::ArrowUp;
+        if (ext == 80) return Key::ArrowDown;
     }
     return Key::Unknown;
 #else
     static RawTerminal raw;
     const int ch = readByte();
-    if (ch < 0)            return Key::Unknown;
+    if (ch < 0)                  return Key::Unknown;
     if (ch == 'q' || ch == 'Q') return Key::Quit;
-    if (ch != '\x1b')      return Key::Unknown;
-    const int bracket = readByte();
-    if (bracket != '[')    return Key::Unknown;
+    if (ch != '\x1b')            return Key::Unknown;
+    if (readByte() != '[')       return Key::Unknown;
     const int code = readByte();
-    if (code < 0)          return Key::Unknown;
+    if (code < 0)                return Key::Unknown;
     if (code == 'A') return Key::ArrowUp;
     if (code == 'B') return Key::ArrowDown;
     if (code == '5' || code == '6')
     {
-        const int tilde = readByte();
-        if (tilde == '~')
+        if (readByte() == '~')
         {
             if (code == '5') return Key::PageUp;
             if (code == '6') return Key::PageDown;
@@ -139,27 +249,73 @@ static Key readKey()
 #endif
 }
 
+// ============================================================
+// Отрисовка
+// ============================================================
+static void render(LinePager& pager)
+{
+    const int rows        = terminalRows();
+    const int contentRows = rows - 1;    // одна строка — статусная панель внизу
+    std::vector<std::string> lines;
+    try
+    {
+        lines = pager.visibleLines(contentRows);
+    }
+    catch (const std::exception& e)
+    {
+        std::cout << "\033[31mError: " << e.what() << "\033[0m\n" << std::flush;
+        return;
+    }
+    // Очистка экрана и переход в начало.
+    std::cout << "\033[2J\033[H";
+    // Контент.
+    for (const auto& line : lines)
+        std::cout << line << '\n';
+    // Статусная панель внизу (инвертированные цвета, занимает всю строку).
+    std::cout << "\033[" << rows << ";1H"        // переход на последнюю строку
+              << "\033[7m"                        // инверсия цветов
+              << " Block " << (pager.currentBlock() + 1)
+              << " / "     << pager.totalBlocks()
+              << "  Line "  << (pager.currentLineInBlock() + 1)
+              << "  (q — выход)"
+              << "\033[K"                         // заполнить строку до конца
+              << "\033[0m"                        // сброс атрибутов
+              << std::flush;
+}
+// ============================================================
+// Точка входа
+// ============================================================
 int main(int argc, char* argv[])
 {
-#if defined(_WIN32)
+#ifdef _WIN32
     SetConsoleOutputCP(65001);
 #endif
     try
     {
         if (argc != 2) throw std::runtime_error("Usage: " + std::string(argv[0]) + " <path-to-json-array-file>");
         JsonBlockPager pager(argv[1]);
-        int64_t currentIndex = 0;
-        auto dummyProgressCallback = [](int percent) {
-                std::cout << "\rLoading... " << percent << '%' << std::flush;
-            };
-        pager.calculateTotalBlocks(dummyProgressCallback);
-        renderBlock(pager, Key::ArrowDown, currentIndex);
+        auto progressCallback = [](int pct) {
+            std::cout << "\rIndexing... " << pct << "%" << std::flush;
+        };
+        pager.calculateTotalBlocks(progressCallback);
+        std::cout << "\rIndexing done.    \n" << std::flush;
+        LinePager lp(pager);
+        render(lp);
         while (true)
         {
-            auto key = readKey();
-            if (key == Key::Quit) return EXIT_SUCCESS;
+            const Key key = readKey();
             if (key == Key::Unknown) continue;
-            renderBlock(pager, key, currentIndex);
+            if (key == Key::Quit)    return EXIT_SUCCESS;
+            const int rows = terminalRows();
+            switch (key)
+            {
+            case Key::ArrowUp:   lp.scroll(-1);          break;
+            case Key::ArrowDown: lp.scroll(+1);          break;
+            case Key::PageUp:    lp.scroll(-(rows - 2)); break;  // overlap 1 строка
+            case Key::PageDown:  lp.scroll(+(rows - 2)); break;
+            default: break;
+            }
+            render(lp);
         }
     }
     catch (const std::exception& ex)
