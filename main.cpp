@@ -14,7 +14,6 @@
 
 #include "JsonBlockPager.hpp"
 
-#include "helper.hpp"
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -27,16 +26,25 @@
 #include <vector>
 #include <stdexcept>
 
+namespace
+{
+    void clearScreen()
+    {
+        std::cout << "\033[2J\033[H";
+    }
+}
+
 void renderBlock(const JsonBlockPager::Block& block, int total)
 {
     clearScreen();
-    std::cout << "=== Object: " << (block.index) << " total: " << (total) << " ===\n";
+    std::cout << "=== Object: " << (block.index) << " / " << (total) << " ===\n";
     try
     {
-        const auto renderedBlock = formatColoredChunkBlock(block.raw);
-        std::cout << renderedBlock;
-        if (renderedBlock.empty() || renderedBlock.back() != '\n')
-            std::cout << '\n';
+        const auto lines = block.formatColoredChunkBlock();
+        for (const auto& line : lines)
+        {
+            std::cout << line << '\n';
+        }
     }
     catch (const std::exception&)
     {
@@ -127,7 +135,6 @@ int main(int argc, char* argv[])
 #if defined(_WIN32)
     SetConsoleOutputCP(65001);
 #endif
-    int totalBlocks = 0;
     try
     {
         if (argc != 2)
@@ -137,6 +144,7 @@ int main(int argc, char* argv[])
         if (!block)
             throw std::runtime_error("Error: No JSON objects found in the file.");
 
+        const int totalBlocks = static_cast<int>(pager.totalBlocks());
         renderBlock(*block, totalBlocks);
 
         while (true)
@@ -151,6 +159,7 @@ int main(int argc, char* argv[])
                 if (next)
                 {
                     block = std::move(next);
+                    const int totalBlocks = static_cast<int>(pager.totalBlocks());
                     renderBlock(*block, totalBlocks);
                 }
                 break;
@@ -163,6 +172,7 @@ int main(int argc, char* argv[])
                 if (previous)
                 {
                     block = std::move(previous);
+                    const int totalBlocks = static_cast<int>(pager.totalBlocks());
                     renderBlock(*block, totalBlocks);
                 }
                 break;

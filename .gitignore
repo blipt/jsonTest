@@ -1,22 +1,26 @@
-﻿################################################################################
-# This .gitignore file was automatically created by Microsoft(R) Visual Studio.
-################################################################################
+```
+# CMake build artifacts
+build/
+CMakeCache.txt
+CMakeFiles/
+Makefile
+cmake_install.cmake
+*.dir/
 
-.vs
-out
-obj
-bin
-toolkits
-/build
-/models
-x64
-/whispercpp_wrapper/x64
-*.user
-/whispercpp_wrapper_visual_studio/speech.VC.db
-whispercpp_core_archive.txt
-whispercpp_core_version.txt
-build_lin_2_proj.sh
-toolkits_lin
-toolkits_win
-output_win
-output_lin
+# Compiled objects and binaries
+*.o
+*.obj
+*.bin
+*.out
+a.out
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*.tmp
+
+# Logs
+*.log
+```
