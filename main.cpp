@@ -150,15 +150,10 @@ int main(int argc, char* argv[])
             throw std::runtime_error("Usage: " + std::string(argv[0]) + " <path-to-json-array-file>");
         JsonBlockPager pager(argv[1]);
         int64_t currentIndex = 0;
-        double progress = 0.0;
-        auto dummyProgressCallback = [&progress](double p){
-            auto delta = p - progress;
-            if (delta >= 0.05)
+        auto dummyProgressCallback = [](double p)
             {
                 std::cout << "\rLoading... " << static_cast<int>(p * 100) << '%' << std::flush;
-                progress = p;
-            }
-        };
+            };
         pager.calculateTotalBlocks(dummyProgressCallback);
         renderBlock(pager, Key::ArrowDown, currentIndex);
         while (true)

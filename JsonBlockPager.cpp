@@ -19,7 +19,7 @@ inline static int64_t parseJsonArray(std::ifstream& input, int64_t& objectStart,
 {
     if (!input.seekg(static_cast<std::streamoff>(objectStart)))
         return -1;
-    
+
     // Skip whitespace and find the start of the next JSON object '{'
     char ch = '\0';
     while (input.get(ch))
@@ -28,11 +28,11 @@ inline static int64_t parseJsonArray(std::ifstream& input, int64_t& objectStart,
         {
             // Found the start of a JSON object, record its position
             int64_t objStartPos = static_cast<int64_t>(input.tellg()) - 1; // Position of '{'
-            
+
             int braceCount = 1;
             bool inString = false;
             bool escape = false;
-            
+
             while (braceCount > 0 && input.get(ch))
             {
                 if (escape)
@@ -40,19 +40,19 @@ inline static int64_t parseJsonArray(std::ifstream& input, int64_t& objectStart,
                     escape = false;
                     continue;
                 }
-                
+
                 if (ch == '\\' && inString)
                 {
                     escape = true;
                     continue;
                 }
-                
+
                 if (ch == '"')
                 {
                     inString = !inString;
                     continue;
                 }
-                
+
                 if (!inString)
                 {
                     if (ch == '{')
@@ -61,7 +61,7 @@ inline static int64_t parseJsonArray(std::ifstream& input, int64_t& objectStart,
                         braceCount--;
                 }
             }
-            
+
             // After closing brace, skip whitespace and check for comma or end
             while (input.get(ch))
             {
@@ -83,7 +83,7 @@ inline static int64_t parseJsonArray(std::ifstream& input, int64_t& objectStart,
                     break;
                 }
             }
-            
+
             // If we reach here without finding ',' or '}', we're at end of file
             objectStart = static_cast<int64_t>(input.tellg());
             if (input.eof())
@@ -100,7 +100,7 @@ inline static int64_t parseJsonArray(std::ifstream& input, int64_t& objectStart,
         }
         // Skip other characters (whitespace, '[', etc.)
     }
-    
+
     // End of file reached
     objectStart = static_cast<int64_t>(fileSize);
     return objectStart;
@@ -113,6 +113,8 @@ JsonBlockPager::JsonBlockPager(const std::filesystem::path& path)
 }
 void JsonBlockPager::calculateTotalBlocks(std::function<void(double progress)> progressCallback) noexcept
 {
+    double lastProgress = 0.0;
+    progressCallback(0.0);
     if (objectOffsets_.empty())
     {
         int64_t objectStart = 0;
@@ -123,10 +125,11 @@ void JsonBlockPager::calculateTotalBlocks(std::function<void(double progress)> p
             if (nextStart < 0) break;
             objectOffsets_.push_back(nextStart);
             objectStart = nextStart;
-            if (progressCallback)
+            const double progress = static_cast<double>(objectStart) / static_cast<double>(fileSize_);
+            if (progress - lastProgress >= 0.05)
             {
-                const double progress = static_cast<double>(objectStart) / static_cast<double>(fileSize_);
                 progressCallback(progress);
+                lastProgress = progress;
             }
         }
     }
@@ -134,7 +137,7 @@ void JsonBlockPager::calculateTotalBlocks(std::function<void(double progress)> p
 [[nodiscard]]
 int64_t JsonBlockPager::totalBlocks() noexcept
 {
-    if(!objectOffsets_.empty()) return static_cast<int64_t>(objectOffsets_.size()) - 1;
+    if (!objectOffsets_.empty()) return static_cast<int64_t>(objectOffsets_.size()) - 1;
     return 0;
 }
 [[nodiscard]]
