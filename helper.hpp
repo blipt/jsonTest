@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "jsonWrapper.hpp" // for nlohmann::json
 

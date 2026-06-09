@@ -1,4 +1,4 @@
-# JSON Stream Viewer
+﻿# JSON Stream Viewer
 Console C++20 application for viewing very large JSON files with a top-level array shape:
 
 ```json

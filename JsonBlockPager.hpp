@@ -22,9 +22,7 @@ public:
     [[nodiscard]] bool hasCurrent() const noexcept;
     [[nodiscard]] std::size_t totalBlocks() const noexcept;
 
-    std::optional<Block> loadCurrent();
-    std::optional<Block> loadNext();
-    std::optional<Block> loadPrevious();
+    std::optional<Block> loadBlock(int64_t index);
 
 private:
     enum class ScanResult {
