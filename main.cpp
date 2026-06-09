@@ -34,36 +34,27 @@ public:
     static constexpr int CACHE_CAPACITY = 64;
     explicit LinePager(JsonBlockPager& pager) : m_pager(pager)
     {
-        if (pager.totalBlocks() > 0)ensureCached(0);     // прогрев: первый блок уже в кэше
+        if (pager.totalBlocks() > 0)ensureCached(0);
     }
-    // Прокрутка: delta > 0 — вниз, delta < 0 — вверх.
     void scroll(int64_t delta)
     {
         if (delta > 0) moveForward(delta);
         else if (delta < 0) moveBackward(-delta);
     }
-    // Вернуть до `rows` строк начиная с текущей позиции.
     std::vector<std::string> visibleLines(int rows)
     {
         std::vector<std::string> out;
         out.reserve(rows);
-
         int64_t blk = m_blockIdx;
         int64_t ln  = m_lineInBlock;
-
-        while (static_cast<int>(out.size()) < rows
-               && blk < m_pager.totalBlocks())
+        while (static_cast<int>(out.size()) < rows && blk < m_pager.totalBlocks())
         {
-            ensureCached(blk);   // гарантируем наличие в кэше
-            // Линейный поиск по маленькому кэшу (CACHE_CAPACITY элементов)
+            ensureCached(blk);
             for (const auto& cb : m_cache)
             {
                 if (cb.idx != blk) continue;
-                while (ln < static_cast<int64_t>(cb.lines.size())
-                       && static_cast<int>(out.size()) < rows)
-                {
+                while (ln < static_cast<int64_t>(cb.lines.size()) && static_cast<int>(out.size()) < rows)
                     out.push_back(cb.lines[ln++]);
-                }
                 break;
             }
             ++blk;
@@ -81,7 +72,7 @@ private:
         std::vector<std::string> lines;
     };
     JsonBlockPager&         m_pager;
-    std::deque<CachedBlock> m_cache;             // скользящее окно блоков
+    std::deque<CachedBlock> m_cache;
     int64_t                 m_blockIdx    = 0;
     int64_t                 m_lineInBlock = 0;
     bool isCached(int64_t idx) const
@@ -94,23 +85,19 @@ private:
     {
         if (idx < 0 || idx >= m_pager.totalBlocks()) return;
         if (isCached(idx)) return;
-        // Вытесняем блок, наиболее удалённый от текущей позиции.
         if (static_cast<int>(m_cache.size()) >= CACHE_CAPACITY)
         {
             auto victim  = m_cache.begin();
             int64_t maxD = 0;
             for (auto it = m_cache.begin(); it != m_cache.end(); ++it)
             {
-                int64_t d = it->idx >= m_blockIdx
-                            ? it->idx - m_blockIdx
-                            : m_blockIdx - it->idx;
+                int64_t d = it->idx >= m_blockIdx ? it->idx - m_blockIdx : m_blockIdx - it->idx;
                 if (d > maxD) { maxD = d; victim = it; }
             }
-            m_cache.erase(victim);   // итераторы инвалидируются, ссылки — нет
+            m_cache.erase(victim);
         }
         m_cache.push_back({idx, m_pager.loadBlock(idx)});
     }
-    // Количество строк в блоке (загружает блок при необходимости).
     int64_t blockLineCount(int64_t idx)
     {
         ensureCached(idx);
@@ -118,35 +105,28 @@ private:
             if (cb.idx == idx) return static_cast<int64_t>(cb.lines.size());
         return 0;
     }
-    // ------------------------------------------------------------------
-    // Навигация
-    // ------------------------------------------------------------------
-    // Вперёд на `delta` строк (зажимаем на последней строке файла).
     void moveForward(int64_t delta)
     {
         while (delta > 0)
         {
             const int64_t N = blockLineCount(m_blockIdx);
-            if (N == 0) return;   // пустой блок — останавливаемся
-            // Строк впереди в текущем блоке (не считая текущую).
+            if (N == 0) return;
             const int64_t available = N - 1 - m_lineInBlock;
             if (delta <= available)
             {
                 m_lineInBlock += delta;
                 return;
             }
-            // Переходим в следующий блок.
             if (m_blockIdx + 1 >= m_pager.totalBlocks())
             {
-                m_lineInBlock = N - 1;   // зажимаем: конец файла
+                m_lineInBlock = N - 1;
                 return;
             }
-            delta -= available + 1;      // расходуем остаток блока + шаг границы
+            delta -= available + 1;
             ++m_blockIdx;
             m_lineInBlock = 0;
         }
     }
-    // Назад на `delta` строк (зажимаем на самой первой строке файла).
     void moveBackward(int64_t delta)
     {
         while (delta > 0)
@@ -156,23 +136,18 @@ private:
                 m_lineInBlock -= delta;
                 return;
             }
-            // Переходим в предыдущий блок.
             if (m_blockIdx == 0)
             {
-                m_lineInBlock = 0;       // зажимаем: начало файла
+                m_lineInBlock = 0;
                 return;
             }
-            delta -= m_lineInBlock + 1;  // расходуем строки до начала блока + шаг
+            delta -= m_lineInBlock + 1;
             --m_blockIdx;
             const int64_t N = blockLineCount(m_blockIdx);
             m_lineInBlock = (N > 0) ? N - 1 : 0;
         }
     }
 };
-// ============================================================
-// Вспомогательные функции терминала
-// ============================================================
-// Возвращает высоту терминала в строках (fallback — 24).
 static int terminalRows()
 {
 #ifdef _WIN32
@@ -248,14 +223,10 @@ static Key readKey()
     return Key::Unknown;
 #endif
 }
-
-// ============================================================
-// Отрисовка
-// ============================================================
 static void render(LinePager& pager)
 {
     const int rows        = terminalRows();
-    const int contentRows = rows - 1;    // одна строка — статусная панель внизу
+    const int contentRows = rows - 1;
     std::vector<std::string> lines;
     try
     {
@@ -266,25 +237,19 @@ static void render(LinePager& pager)
         std::cout << "\033[31mError: " << e.what() << "\033[0m\n" << std::flush;
         return;
     }
-    // Очистка экрана и переход в начало.
-    std::cout << "\033[2J\033[H";
-    // Контент.
+    std::cout << "\033[2J\033[3J\033[H";
     for (const auto& line : lines)
         std::cout << line << '\n';
-    // Статусная панель внизу (инвертированные цвета, занимает всю строку).
-    std::cout << "\033[" << rows << ";1H"        // переход на последнюю строку
-              << "\033[7m"                        // инверсия цветов
+    std::cout << "\033[" << rows << ";1H"
+              << "\033[7m"
               << " Block " << (pager.currentBlock() + 1)
               << " / "     << pager.totalBlocks()
               << "  Line "  << (pager.currentLineInBlock() + 1)
               << "  (q - exit)"
-              << "\033[K"                         // заполнить строку до конца
-              << "\033[0m"                        // сброс атрибутов
+              << "\033[K"
+              << "\033[0m"
               << std::flush;
 }
-// ============================================================
-// Точка входа
-// ============================================================
 int main(int argc, char* argv[])
 {
 #ifdef _WIN32
@@ -311,7 +276,7 @@ int main(int argc, char* argv[])
             {
             case Key::ArrowUp:   lp.scroll(-1);          break;
             case Key::ArrowDown: lp.scroll(+1);          break;
-            case Key::PageUp:    lp.scroll(-(rows - 2)); break;  // overlap 1 строка
+            case Key::PageUp:    lp.scroll(-(rows - 2)); break;
             case Key::PageDown:  lp.scroll(+(rows - 2)); break;
             default: break;
             }
