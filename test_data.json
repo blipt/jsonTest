@@ -1,0 +1,5 @@
+[
+  {"text": [{"index": 0, "value": "Hello", "color": "#FF0000"}], "timestamp": "00:00:01.000", "duration": 1000},
+  {"text": [{"index": 0, "value": "World", "color": "#00FF00"}], "timestamp": "00:00:02.000", "duration": 1000},
+  {"text": [{"index": 0, "value": "Test", "color": "#0000FF"}], "timestamp": "00:00:03.000", "duration": 1000}
+]
