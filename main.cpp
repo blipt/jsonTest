@@ -38,12 +38,8 @@ enum class Key
 
 void renderBlock(JsonBlockPager& pager, Key key, int64_t& currentIndex)
 {
-   //    pager.loadNext()  
-   //    pager.loadPrevious()   
-   //    pager.loadCurrent()
-
     switch (key)
-    {       
+    {   
     case Key::ArrowUp:currentIndex--; break;
     case Key::ArrowDown:currentIndex++; break;
     case Key::PageUp:currentIndex--; break;
@@ -53,7 +49,7 @@ void renderBlock(JsonBlockPager& pager, Key key, int64_t& currentIndex)
     default: return;
     }
     currentIndex = std::clamp(currentIndex, int64_t(0), static_cast<int64_t>(pager.totalBlocks()) - 1);
-    std::vector<std::string> block = std::move(pager.loadBlock(currentIndex));
+    auto block = pager.loadBlock(currentIndex);
     if (!block)
         return;
     std::cout << "\033[2J\033[H"; // Clear screen and move cursor to home position
@@ -149,8 +145,8 @@ int main(int argc, char* argv[])
         if (argc != 2)
             throw std::runtime_error("Usage: " + std::string(argv[0]) + " <path-to-json-array-file>");
         JsonBlockPager pager(argv[1]);
-        int64_t currentIndex = -1;
-        renderBlock(pager, Key::Unknown);
+        int64_t currentIndex = 0;
+        renderBlock(pager, Key::ArrowDown, currentIndex);
         while (true)
         {
             auto key = readKey();

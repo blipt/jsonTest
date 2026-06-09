@@ -33,23 +33,11 @@ std::size_t JsonBlockPager::totalBlocks() const noexcept {
     return objectOffsets_.size();
 }
 
-std::optional<JsonBlockPager::Block> JsonBlockPager::loadCurrent() {
-    if (hasCurrent_) {
-        return loadAt(currentIndex_);
-    }
-    return loadNext();
-}
-
-std::optional<JsonBlockPager::Block> JsonBlockPager::loadNext() {
-    const std::size_t targetIndex = hasCurrent_ ? currentIndex_ + 1 : 0;
-    return loadAt(targetIndex);
-}
-
-std::optional<JsonBlockPager::Block> JsonBlockPager::loadPrevious() {
-    if (!hasCurrent_ || currentIndex_ == 0) {
+std::optional<JsonBlockPager::Block> JsonBlockPager::loadBlock(int64_t index) {
+    if (index < 0) {
         return std::nullopt;
     }
-    return loadAt(currentIndex_ - 1);
+    return loadAt(static_cast<std::size_t>(index));
 }
 
 std::optional<JsonBlockPager::Block> JsonBlockPager::loadAt(std::size_t index) {
