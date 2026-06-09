@@ -34,9 +34,7 @@ inline static int64_t parseJsonArray(std::ifstream& input, int64_t fileSize)
             break;
         }
     }
-
-    if (objectStart < 0)        return fileSize; // EOF before '{': end of array
-    if (objectStart > fileSize) return -1;        // Sanity: position is beyond file
+    if (objectStart < 0 || objectStart >= fileSize) return fileSize;
 
     // Phase 2: Walk the object body, tracking brace depth and string state so
     // that '}' inside a string or a nested object is not mistaken for the root close.
