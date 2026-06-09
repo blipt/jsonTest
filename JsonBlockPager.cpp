@@ -12,7 +12,7 @@
 
 // file structure: [ { ... }, { ... }, ... ]
 // simplified example of file content (one line, no whitespace):
-// [{ "environment": { "idle": true } },{"activity": 0.3889007568359375,"display": true,"duration": 2020,"past_tokens": 0,"process": 1655,"start": "2026-06-08T01:54:35.293+0200","text": [{"value": " a"},{"value": "b"},{"value": "c"}],"timestamp": "00:00:00.000","tokens": [{"Dur": "       00.000"},{"Dur": "       00.040"},{"Dur": "       00.000"}]},{ "environment": { "run": true } }]
+// [{ "environment": { "idle": true } },{"activity": 0,"display": true,"duration": 0,"past_tokens": 0,"process": 0,"start": "2026-06-08T01:54:35.293+0200","text": [{"value": " a"},{"value": "b"},{"value": "c"}],"timestamp": "00:00:00.000","tokens": [{"Dur": "       00.000"},{"Dur": "       00.040"},{"Dur": "       00.000"}]},{ "environment": { "run": true } }]
 
 // Scans the input starting from objectStart for the next root JSON object
 // return offsets of the start of each JSON object in the file. Last object offset is the end of the file
