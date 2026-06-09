@@ -81,9 +81,9 @@ public:
     {
         tcgetattr(STDIN_FILENO, &m_saved);
         termios raw = m_saved;
-        raw.c_lflag &= ~(ICANON | ECHO); // отключить буферизацию строк и эхо
-        raw.c_cc[VMIN] = 1;             // блокировать до прихода 1 байта
-        raw.c_cc[VTIME] = 0;             // без таймаута
+        raw.c_lflag &= ~(ICANON | ECHO);// disable canonical mode and echo
+        raw.c_cc[VMIN] = 1;             // block until 1 byte arrives
+        raw.c_cc[VTIME] = 0;            // no timeout
         tcsetattr(STDIN_FILENO, TCSANOW, &raw);
     }
     ~RawTerminal()
