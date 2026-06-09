@@ -10,7 +10,7 @@
 class JsonBlockPager {
 public:
     explicit JsonBlockPager(const std::filesystem::path& path);
-    void calculateTotalBlocks(std::function<void(double progress)> progressCallback) noexcept;
+    void calculateTotalBlocks(std::function<void(int progress)> progressCallback) noexcept;
     [[nodiscard]] int64_t totalBlocks() noexcept;
     [[nodiscard]] std::vector<std::string> loadBlock(int64_t index);
 private:

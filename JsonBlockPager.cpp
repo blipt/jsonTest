@@ -10,100 +10,22 @@
 #include <string>
 #include <vector>
 
-// file structure: [ { ...json format block for formatColoredChunkBlock... }, { ...json format block for formatColoredChunkBlock... }, ... ]
+// file structure: [ { ... }, { ... }, ... ]
+// simplified example of file content (one line, no whitespace):
+// [{ "environment": { "idle": true } },{"activity": 0.3889007568359375,"display": true,"duration": 2020,"past_tokens": 0,"process": 1655,"start": "2026-06-08T01:54:35.293+0200","text": [{"value": " a"},{"value": "b"},{"value": "c"}],"timestamp": "00:00:00.000","tokens": [{"Dur": "       00.000"},{"Dur": "       00.040"},{"Dur": "       00.000"}]},{ "environment": { "run": true } }]
+
 // Scans the input starting from objectStart for the next root JSON object
 // return offsets of the start of each JSON object in the file. Last object offset is the end of the file
 // first object starts at offset > 0 '[ {' so '{' we can find somewhere after '[' character
 // if objectStart == end of file, return same value, if objectStart > end of file, return -1
-inline static int64_t parseJsonArray(std::ifstream& input, int64_t& objectStart, int64_t fileSize)
+inline static int64_t parseJsonArray(std::ifstream& input, int64_t fileSize)
 {
-    if (!input.seekg(static_cast<std::streamoff>(objectStart)))
-        return -1;
-
-    // Skip whitespace and find the start of the next JSON object '{'
     char ch = '\0';
     while (input.get(ch))
     {
-        if (ch == '{')
-        {
-            // Found the start of a JSON object, record its position
-            int64_t objStartPos = static_cast<int64_t>(input.tellg()) - 1; // Position of '{'
-
-            int braceCount = 1;
-            bool inString = false;
-            bool escape = false;
-
-            while (braceCount > 0 && input.get(ch))
-            {
-                if (escape)
-                {
-                    escape = false;
-                    continue;
-                }
-
-                if (ch == '\\' && inString)
-                {
-                    escape = true;
-                    continue;
-                }
-
-                if (ch == '"')
-                {
-                    inString = !inString;
-                    continue;
-                }
-
-                if (!inString)
-                {
-                    if (ch == '{')
-                        braceCount++;
-                    else if (ch == '}')
-                        braceCount--;
-                }
-            }
-
-            // After closing brace, skip whitespace and check for comma or end
-            while (input.get(ch))
-            {
-                if (ch == '}' || ch == ']')
-                {
-                    // End of array - store the start of this object and return end position
-                    objectStart = static_cast<int64_t>(input.tellg());
-                    return objStartPos;
-                }
-                if (ch == ',')
-                {
-                    // More objects follow - store the start of this object and return position after comma
-                    objectStart = static_cast<int64_t>(input.tellg());
-                    return objStartPos;
-                }
-                if (!helper::isWhitespace(ch))
-                {
-                    // Unexpected character
-                    break;
-                }
-            }
-
-            // If we reach here without finding ',' or '}', we're at end of file
-            objectStart = static_cast<int64_t>(input.tellg());
-            if (input.eof())
-                objectStart = static_cast<int64_t>(fileSize);
-            return objStartPos;
-        }
-        else if (ch == ']' || ch == '}')
-        {
-            // End of array reached
-            objectStart = static_cast<int64_t>(input.tellg());
-            if (input.eof())
-                objectStart = static_cast<int64_t>(fileSize);
-            return objectStart;
-        }
-        // Skip other characters (whitespace, '[', etc.)
+        throw std::runtime_error("Not implemented");
     }
-
-    // End of file reached
-    objectStart = static_cast<int64_t>(fileSize);
-    return objectStart;
+    return fileSize;// End of file reached
 }
 JsonBlockPager::JsonBlockPager(const std::filesystem::path& path)
 {
@@ -111,26 +33,27 @@ JsonBlockPager::JsonBlockPager(const std::filesystem::path& path)
     input_.open(path, std::ios::binary);
     if (!input_) throw std::runtime_error("Cannot open file: " + path.string());
 }
-void JsonBlockPager::calculateTotalBlocks(std::function<void(double progress)> progressCallback) noexcept
+void JsonBlockPager::calculateTotalBlocks(std::function<void(int progress)> progressCallback) noexcept
 {
-    double lastProgress = 0.0;
-    progressCallback(0.0);
-    if (objectOffsets_.empty())
+    if (!objectOffsets_.empty() || fileSize_ <= 0 || !input_ || !input_.seekg(0))
     {
-        int64_t objectStart = 0;
-        while (true)
+        progressCallback(100);
+        return;
+    }
+    int lastProgress = 0;
+    progressCallback(0);
+    while (true)
+    {
+        int64_t objectStart = parseJsonArray(input_, fileSize_);
+        if (objectStart < 0) break;
+        objectOffsets_.push_back(objectStart);
+        const int progress = static_cast<int>(static_cast<double>(objectStart) / static_cast<double>(fileSize_) * 100);
+        if (progress - lastProgress >= 5)
         {
-            if (objectStart >= fileSize_) break;
-            objectStart = parseJsonArray(input_, objectStart, fileSize_);
-            if (objectStart < 0) break;
-            objectOffsets_.push_back(objectStart);
-            const double progress = static_cast<double>(objectStart) / static_cast<double>(fileSize_);
-            if (progress - lastProgress >= 0.05)
-            {
-                progressCallback(progress);
-                lastProgress = progress;
-            }
+            progressCallback(progress);
+            lastProgress = progress;
         }
+        if (objectStart >= fileSize_) break;
     }
 }
 [[nodiscard]]
