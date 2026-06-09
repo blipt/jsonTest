@@ -60,7 +60,7 @@ static void renderBlock(JsonBlockPager& pager, Key key, int64_t& currentIndex)
         currentIndex = std::clamp(currentIndex, int64_t(0), static_cast<int64_t>(pager.totalBlocks()) - 1);
         std::vector<std::string> strings = std::move(pager.loadBlock(currentIndex));
         // Clear screen and move cursor to home position and print header
-        std::cout << "\033[2J\033[H=== Object: " << (currentIndex) << " / " << (pager.totalBlocks()) << " ===\n";
+        std::cout << "\033[2J\033[H=== " << (currentIndex) << " / " << (pager.totalBlocks()) << " ===\n";
         for (const auto& line : strings)
             std::cout << line << '\n';
     }
