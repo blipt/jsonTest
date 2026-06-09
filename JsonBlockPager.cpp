@@ -113,7 +113,6 @@ JsonBlockPager::JsonBlockPager(const std::filesystem::path& path)
 }
 void JsonBlockPager::calculateTotalBlocks(std::function<void(double progress)> progressCallback) noexcept
 {
-    (void)progressCallback; // unused for now
     if (objectOffsets_.empty())
     {
         int64_t objectStart = 0;
@@ -124,6 +123,11 @@ void JsonBlockPager::calculateTotalBlocks(std::function<void(double progress)> p
             if (nextStart < 0) break;
             objectOffsets_.push_back(nextStart);
             objectStart = nextStart;
+            if (progressCallback)
+            {
+                const double progress = static_cast<double>(objectStart) / static_cast<double>(fileSize_);
+                progressCallback(progress);
+            }
         }
     }
 }
