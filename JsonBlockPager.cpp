@@ -121,10 +121,9 @@ void JsonBlockPager::calculateTotalBlocks(std::function<void(double progress)> p
         while (true)
         {
             if (objectStart >= fileSize_) break;
-            int64_t nextStart = parseJsonArray(input_, objectStart, fileSize_);
-            if (nextStart < 0) break;
-            objectOffsets_.push_back(nextStart);
-            objectStart = nextStart;
+            objectStart = parseJsonArray(input_, objectStart, fileSize_);
+            if (objectStart < 0) break;
+            objectOffsets_.push_back(objectStart);
             const double progress = static_cast<double>(objectStart) / static_cast<double>(fileSize_);
             if (progress - lastProgress >= 0.05)
             {
