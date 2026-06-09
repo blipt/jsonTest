@@ -4,7 +4,7 @@
 #   include <Windows.h>
 #   include <consoleapi2.h>
 #   include <fcntl.h>
-# include <conio.h>
+#   include <conio.h>
 #else
 #   include <unistd.h>
 #   include <termios.h>
@@ -14,7 +14,6 @@
 
 #include "JsonBlockPager.hpp"
 
-#include "helper.hpp"
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -27,24 +26,6 @@
 #include <vector>
 #include <stdexcept>
 
-void renderBlock(const JsonBlockPager::Block& block, int total)
-{
-    clearScreen();
-    std::cout << "=== Object: " << (block.index) << " total: " << (total) << " ===\n";
-    try
-    {
-        const auto renderedBlock = formatColoredChunkBlock(block.raw);
-        std::cout << renderedBlock;
-        if (renderedBlock.empty() || renderedBlock.back() != '\n')
-            std::cout << '\n';
-    }
-    catch (const std::exception&)
-    {
-        std::cout << block.raw << '\n';
-    }
-    std::cout.flush();
-}
-
 enum class Key
 {
     ArrowUp,
@@ -54,6 +35,42 @@ enum class Key
     Quit,
     Unknown,
 };
+
+void renderBlock(JsonBlockPager& pager, Key key, int64_t& currentIndex)
+{
+   //    pager.loadNext()  
+   //    pager.loadPrevious()   
+   //    pager.loadCurrent()
+
+    switch (key)
+    {       
+    case Key::ArrowUp:currentIndex--; break;
+    case Key::ArrowDown:currentIndex++; break;
+    case Key::PageUp:currentIndex--; break;
+    case Key::PageDown:currentIndex++; break;
+    case Key::Quit: return;
+    case Key::Unknown: return;
+    default: return;
+    }
+    currentIndex = std::clamp(currentIndex, int64_t(0), static_cast<int64_t>(pager.totalBlocks()) - 1);
+    const auto block = std::move(pager.loadBlock(currentIndex));
+    if (!block)
+        return;
+    std::cout << "\033[2J\033[H"; // Clear screen and move cursor to home position
+    std::cout << "=== Object: " << (block->index) << " / " << (pager.totalBlocks()) << " ===\n";
+    try
+    {
+        const auto lines = block->formatColoredChunkBlock();
+        for (const auto& line : lines)
+            std::cout << line << '\n';
+    }
+    catch (const std::exception&)
+    {
+        std::cout << block->raw << '\n';
+    }
+    std::cout.flush();
+}
+
 
 #ifndef _WIN32
 class RawTerminal
@@ -127,52 +144,21 @@ int main(int argc, char* argv[])
 #if defined(_WIN32)
     SetConsoleOutputCP(65001);
 #endif
-    int totalBlocks = 0;
     try
     {
         if (argc != 2)
             throw std::runtime_error("Usage: " + std::string(argv[0]) + " <path-to-json-array-file>");
         JsonBlockPager pager(argv[1]);
-        std::optional<JsonBlockPager::Block> block = pager.loadCurrent();
-        if (!block)
-            throw std::runtime_error("Error: No JSON objects found in the file.");
-
-        renderBlock(*block, totalBlocks);
-
+        int64_t currentIndex = -1;
+        renderBlock(pager, Key::Unknown);
         while (true)
         {
-            switch (readKey())
-            {
-            case Key::PageDown:
-                [[fallthrough]];
-            case Key::ArrowDown:
-            {
-                auto next = pager.loadNext();
-                if (next)
-                {
-                    block = std::move(next);
-                    renderBlock(*block, totalBlocks);
-                }
-                break;
-            }
-            case Key::PageUp:
-                [[fallthrough]];
-            case Key::ArrowUp:
-            {
-                auto previous = pager.loadPrevious();
-                if (previous)
-                {
-                    block = std::move(previous);
-                    renderBlock(*block, totalBlocks);
-                }
-                break;
-            }
-            case Key::Quit:
-                clearScreen();
+            auto key = readKey();
+            if (key == Key::Quit)
                 return EXIT_SUCCESS;
-            case Key::Unknown:
-                break;
-            }
+            if (key == Key::Unknown)
+                continue;
+            renderBlock(pager, key, currentIndex);
         }
     }
     catch (const std::exception& ex)

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <cstdint>
 #include <filesystem>
@@ -12,6 +12,7 @@ public:
     struct Block {
         std::size_t index{};
         std::string raw;
+        [[nodiscard]] std::vector<std::string> formatColoredChunkBlock() const;
     };
 
     explicit JsonBlockPager(const std::filesystem::path& path);
@@ -19,6 +20,7 @@ public:
     [[nodiscard]] const std::filesystem::path& path() const noexcept;
     [[nodiscard]] std::size_t currentIndex() const noexcept;
     [[nodiscard]] bool hasCurrent() const noexcept;
+    [[nodiscard]] std::size_t totalBlocks() const noexcept;
 
     std::optional<Block> loadCurrent();
     std::optional<Block> loadNext();
