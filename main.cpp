@@ -146,12 +146,10 @@ int main(int argc, char* argv[])
 #endif
     try
     {
-        if (argc != 2)
-            throw std::runtime_error("Usage: " + std::string(argv[0]) + " <path-to-json-array-file>");
+        if (argc != 2) throw std::runtime_error("Usage: " + std::string(argv[0]) + " <path-to-json-array-file>");
         JsonBlockPager pager(argv[1]);
         int64_t currentIndex = 0;
-        auto dummyProgressCallback = [](int percent)
-            {
+        auto dummyProgressCallback = [](int percent) {
                 std::cout << "\rLoading... " << percent << '%' << std::flush;
             };
         pager.calculateTotalBlocks(dummyProgressCallback);
@@ -159,10 +157,8 @@ int main(int argc, char* argv[])
         while (true)
         {
             auto key = readKey();
-            if (key == Key::Quit)
-                return EXIT_SUCCESS;
-            if (key == Key::Unknown)
-                continue;
+            if (key == Key::Quit) return EXIT_SUCCESS;
+            if (key == Key::Unknown) continue;
             renderBlock(pager, key, currentIndex);
         }
     }
