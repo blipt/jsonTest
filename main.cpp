@@ -51,8 +51,8 @@ static void renderBlock(JsonBlockPager& pager, Key key, int64_t& currentIndex)
         {
         case Key::ArrowUp:currentIndex--; break;
         case Key::ArrowDown:currentIndex++; break;
-        case Key::PageUp:currentIndex--; break;
-        case Key::PageDown:currentIndex++; break;
+        case Key::PageUp:currentIndex -= 20; break;
+        case Key::PageDown:currentIndex += 20; break;
         case Key::Quit: return;
         case Key::Unknown: return;
         default: return;

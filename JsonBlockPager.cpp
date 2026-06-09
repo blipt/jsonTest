@@ -40,9 +40,9 @@ inline static int64_t parseJsonArray(std::ifstream& input, int64_t fileSize)
 
     // Phase 2: Walk the object body, tracking brace depth and string state so
     // that '}' inside a string or a nested object is not mistaken for the root close.
-    int  depth    = 1;
+    int  depth = 1;
     bool inString = false;
-    bool escaped  = false;
+    bool escaped = false;
 
     while (depth > 0 && input.get(ch))
     {
@@ -54,7 +54,7 @@ inline static int64_t parseJsonArray(std::ifstream& input, int64_t fileSize)
 
         if (inString)
         {
-            if      (ch == '\\') escaped  = true;
+            if (ch == '\\') escaped = true;
             else if (ch == '"')  inString = false;
             continue;
         }
@@ -103,8 +103,9 @@ void JsonBlockPager::calculateTotalBlocks(std::function<void(int progress)> prog
 [[nodiscard]]
 int64_t JsonBlockPager::totalBlocks() noexcept
 {
-    if (!objectOffsets_.empty()) return static_cast<int64_t>(objectOffsets_.size()) - 1;
-    return 0;
+    if (objectOffsets_.empty())
+        return 0;
+    return static_cast<int64_t>(objectOffsets_.size()) - 1;
 }
 [[nodiscard]]
 std::vector<std::string> JsonBlockPager::loadBlock(int64_t index)
