@@ -53,7 +53,7 @@ void renderBlock(JsonBlockPager& pager, Key key, int64_t& currentIndex)
     default: return;
     }
     currentIndex = std::clamp(currentIndex, int64_t(0), static_cast<int64_t>(pager.totalBlocks()) - 1);
-    const auto block = std::move(pager.loadBlock(currentIndex));
+    std::vector<std::string> block = std::move(pager.loadBlock(currentIndex));
     if (!block)
         return;
     std::cout << "\033[2J\033[H"; // Clear screen and move cursor to home position
