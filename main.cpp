@@ -27,10 +27,10 @@
 #include <vector>
 #include <stdexcept>
 
-void renderBlock(const JsonBlockPager::Block& block)
+void renderBlock(const JsonBlockPager::Block& block, int total)
 {
     clearScreen();
-    std::cout << "=== Object: " << (block.index) <<")\n";
+    std::cout << "=== Object: " << (block.index) << " total: " << (total) << " ===\n";
     try
     {
         const auto renderedBlock = formatColoredChunkBlock(block.raw);
@@ -127,6 +127,7 @@ int main(int argc, char* argv[])
 #if defined(_WIN32)
     SetConsoleOutputCP(65001);
 #endif
+    int totalBlocks = 0;
     try
     {
         if (argc != 2)
@@ -136,7 +137,7 @@ int main(int argc, char* argv[])
         if (!block)
             throw std::runtime_error("Error: No JSON objects found in the file.");
 
-        renderBlock(*block);
+        renderBlock(*block, totalBlocks);
 
         while (true)
         {
@@ -150,7 +151,7 @@ int main(int argc, char* argv[])
                 if (next)
                 {
                     block = std::move(next);
-                    renderBlock(*block);
+                    renderBlock(*block, totalBlocks);
                 }
                 break;
             }
@@ -162,7 +163,7 @@ int main(int argc, char* argv[])
                 if (previous)
                 {
                     block = std::move(previous);
-                    renderBlock(*block);
+                    renderBlock(*block, totalBlocks);
                 }
                 break;
             }
