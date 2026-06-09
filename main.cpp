@@ -2,30 +2,36 @@
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
+
 #   include <Windows.h>
-#   include <consoleapi2.h>
-#   include <fcntl.h>
+
 #   include <conio.h>
+
+#   include <consoleapi2.h>
+
+#   include <fcntl.h>
+
 #else
-#   include <unistd.h>
-#   include <termios.h>
-#   include <sys/select.h>
 #   include <dlfcn.h>
+
+#   include <sys/select.h>
+
+#   include <termios.h>
+
+#   include <unistd.h>
 #endif
 
-#include "JsonBlockPager.hpp"
+#include "JsonBlockPager.h"
 
 #include <algorithm>
 #include <cstdint>
-#include <cstdio>
 #include <cstdlib>
 #include <exception>
 #include <iostream>
-#include <optional>
-#include <sstream>
-#include <string>
-#include <vector>
 #include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
 
 enum class Key
 {
@@ -37,33 +43,30 @@ enum class Key
     Unknown,
 };
 
-void renderBlock(JsonBlockPager& pager, Key key, int64_t& currentIndex)
+static void renderBlock(JsonBlockPager& pager, Key key, int64_t& currentIndex)
 {
-    switch (key)
-    {   
-    case Key::ArrowUp:currentIndex--; break;
-    case Key::ArrowDown:currentIndex++; break;
-    case Key::PageUp:currentIndex--; break;
-    case Key::PageDown:currentIndex++; break;
-    case Key::Quit: return;
-    case Key::Unknown: return;
-    default: return;
-    }
-    currentIndex = std::clamp(currentIndex, int64_t(0), static_cast<int64_t>(pager.totalBlocks()) - 1);
-    auto block = pager.loadBlock(currentIndex);
-    if (!block)
-        return;
-    std::cout << "\033[2J\033[H"; // Clear screen and move cursor to home position
-    std::cout << "=== Object: " << (block->index) << " / " << (pager.totalBlocks()) << " ===\n";
     try
     {
-        const auto lines = block->formatColoredChunkBlock();
-        for (const auto& line : lines)
+        switch (key)
+        {
+        case Key::ArrowUp:currentIndex--; break;
+        case Key::ArrowDown:currentIndex++; break;
+        case Key::PageUp:currentIndex--; break;
+        case Key::PageDown:currentIndex++; break;
+        case Key::Quit: return;
+        case Key::Unknown: return;
+        default: return;
+        }
+        currentIndex = std::clamp(currentIndex, int64_t(0), static_cast<int64_t>(pager.totalBlocks()) - 1);
+        std::vector<std::string> strings = std::move(pager.loadBlock(currentIndex));
+        // Clear screen and move cursor to home position and print header
+        std::cout << "\033[2J\033[H=== Object: " << (currentIndex) << " / " << (pager.totalBlocks()) << " ===\n";
+        for (const auto& line : strings)
             std::cout << line << '\n';
     }
     catch (const std::exception&)
     {
-        std::cout << block->raw << '\n';
+        std::cout << "\033[31m" << "Error rendering block" << "\033[0m" << '\n'; // Red
     }
     std::cout.flush();
 }
@@ -79,7 +82,7 @@ public:
         tcgetattr(STDIN_FILENO, &m_saved);
         termios raw = m_saved;
         raw.c_lflag &= ~(ICANON | ECHO); // отключить буферизацию строк и эхо
-        raw.c_cc[VMIN]  = 1;             // блокировать до прихода 1 байта
+        raw.c_cc[VMIN] = 1;             // блокировать до прихода 1 байта
         raw.c_cc[VTIME] = 0;             // без таймаута
         tcsetattr(STDIN_FILENO, TCSANOW, &raw);
     }
@@ -96,7 +99,7 @@ static int readByte()
 }
 #endif
 
-Key readKey()
+static Key readKey()
 {
 #ifdef _WIN32
     const int ch = _getch();
@@ -147,6 +150,16 @@ int main(int argc, char* argv[])
             throw std::runtime_error("Usage: " + std::string(argv[0]) + " <path-to-json-array-file>");
         JsonBlockPager pager(argv[1]);
         int64_t currentIndex = 0;
+        double progress = 0.0;
+        auto dummyProgressCallback = [&progress](double p){
+            auto delta = p - progress;
+            if (delta >= 0.05)
+            {
+                std::cout << "\rLoading... " << static_cast<int>(p * 100) << '%' << std::flush;
+                progress = p;
+            }
+        };
+        pager.calculateTotalBlocks(dummyProgressCallback);
         renderBlock(pager, Key::ArrowDown, currentIndex);
         while (true)
         {

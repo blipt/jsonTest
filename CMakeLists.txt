@@ -9,9 +9,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_executable(json_stream_viewer
     "main.cpp"
     "JsonBlockPager.cpp"
+    "helper.cpp"
 )
-
-target_compile_features(json_stream_viewer PRIVATE cxx_std_20)
 
 if(MSVC)
     target_compile_options(json_stream_viewer PRIVATE /W4 /permissive-)
