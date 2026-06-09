@@ -277,7 +277,7 @@ static void render(LinePager& pager)
               << " Block " << (pager.currentBlock() + 1)
               << " / "     << pager.totalBlocks()
               << "  Line "  << (pager.currentLineInBlock() + 1)
-              << "  (q — выход)"
+              << "  (q - exit)"
               << "\033[K"                         // заполнить строку до конца
               << "\033[0m"                        // сброс атрибутов
               << std::flush;
