@@ -238,14 +238,15 @@ static void render(LinePager& pager)
         return;
     }
     // Clear screen, history and move cursor to top-left corner
-    std::cout << "\033[2J\033[3J\033[H  Block " 
-              << (pager.currentBlock() + 1)
-              << "/" 
-              << pager.totalBlocks()
-              //<< "   "  << (pager.currentLineInBlock() + 1)
-              << "\n";
-    for (const auto& line : lines)
-        std::cout << line << '\n';
+    std::cout << "\033[2J\033[3J\033[H";
+    std::cout << " Block " << (pager.currentBlock() + 1) << "/" << pager.totalBlocks() << "\n";
+    int size = static_cast<int>(lines.size());
+    for (int i = 0; i < size; ++i)
+    {
+        std::cout << lines[i];
+        if (i < size - 1)
+            std::cout << "\n";
+    }
     std::cout << std::flush;
 }
 int main(int argc, char* argv[])
