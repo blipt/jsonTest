@@ -225,7 +225,7 @@ static Key readKey()
 }
 static void render(LinePager& pager)
 {
-    const int rows        = terminalRows();
+    const int rows = terminalRows();
     const int contentRows = rows - 1;
     std::vector<std::string> lines;
     try
