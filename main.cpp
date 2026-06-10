@@ -237,18 +237,16 @@ static void render(LinePager& pager)
         std::cout << "\033[31mError: " << e.what() << "\033[0m\n" << std::flush;
         return;
     }
-    std::cout << "\033[2J\033[3J\033[H";
+    // Clear screen, history and move cursor to top-left corner
+    std::cout << "\033[2J\033[3J\033[H  Block " 
+              << (pager.currentBlock() + 1)
+              << "/" 
+              << pager.totalBlocks()
+              //<< "   "  << (pager.currentLineInBlock() + 1)
+              << "\n";
     for (const auto& line : lines)
         std::cout << line << '\n';
-    std::cout << "\033[" << rows << ";1H"
-              << "\033[7m"
-              << " Block " << (pager.currentBlock() + 1)
-              << " / "     << pager.totalBlocks()
-              << "  Line "  << (pager.currentLineInBlock() + 1)
-              << "  (q - exit)"
-              << "\033[K"
-              << "\033[0m"
-              << std::flush;
+    std::cout << std::flush;
 }
 int main(int argc, char* argv[])
 {
