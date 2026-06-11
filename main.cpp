@@ -256,8 +256,18 @@ int main(int argc, char* argv[])
 #endif
     try
     {
-        if (argc != 2) throw std::runtime_error("Usage: " + std::string(argv[0]) + " <path-to-json-array-file>");
-        JsonBlockPager pager(argv[1]);
+        std::string path;
+        if (argc == 2)
+        {
+            path = argv[1];
+        }
+        else
+        {
+            std::cout << "Enter path to JSON array file: " << std::flush;
+            if (!std::getline(std::cin, path) || path.empty())
+                throw std::runtime_error("No input file provided.");
+        }
+        JsonBlockPager pager(path);
         auto progressCallback = [](int pct) {
             std::cout << "\rIndexing... " << pct << "%" << std::flush;
         };
